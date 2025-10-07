@@ -1,8 +1,13 @@
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from dotenv import load_dotenv
+import os
 
-db_url = "postgresql://postgres:Machinelearning1011@localhost:5432/annotation"
+load_dotenv()
+db_url=os.getenv("db_url")
+
+
 engine = create_engine(db_url)
 print("db is connected")
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
