@@ -13,3 +13,5 @@ class Users(Base):
     password=Column(String, nullable=False)
     otp=Column(String, nullable=True)
     otpExpiry=Column(DateTime, nullable=True)
+
+    
