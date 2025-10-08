@@ -6,13 +6,28 @@ from models import modelsp
 import bcrypt
 from fastapi.responses import JSONResponse
 from router import router_login
-
+from router import admin_router
+from fastapi.middleware.cors import CORSMiddleware
 
 
 models.database_models.Base.metadata.create_all(bind=engine)
 
 
 app = FastAPI()
+
+origins = [
+    "http://localhost:5173",  # Your frontend (Vite/React) address
+    # Add other production/staging origins here later
+]
+
+# 2. Add the CORSMiddleware to your app
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,  # Allows the specified origins
+    allow_credentials=True, # Allows cookies to be sent
+    allow_methods=["*"],    # Allows all methods (GET, POST, PUT, DELETE, etc.)
+    allow_headers=["*"],    # Allows all headers
+)
 
 
 def hash_password(password: str) -> str:
@@ -64,7 +79,7 @@ init_db()
 
 
 app.include_router(router_login.router)
-
+app.include_router(admin_router.router)
 
 
 
