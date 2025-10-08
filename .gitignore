@@ -27,7 +27,8 @@ dist-ssr
 
 .env
 venvv/
-
+__pycache__/
+cp.py
 
 
 
