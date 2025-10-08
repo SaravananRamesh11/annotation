@@ -16,8 +16,8 @@ models.database_models.Base.metadata.create_all(bind=engine)
 app = FastAPI()
 
 origins = [
-    "http://localhost:5173",  # Your frontend (Vite/React) address
-    # Add other production/staging origins here later
+    "http://localhost:5173"
+ 
 ]
 
 # 2. Add the CORSMiddleware to your app
