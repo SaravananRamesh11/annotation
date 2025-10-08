@@ -29,6 +29,7 @@ dist-ssr
 venvv/
 __pycache__/
 cp.py
+notes.txt
 
 
 
