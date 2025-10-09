@@ -126,18 +126,9 @@ def get_all_projects(db: Session = Depends(get_db)):
 
 #Add User end point
 
-# Pydantic model for input validation
-class UserCreate(BaseModel):
-    user_id: str
-    name: str
-    email: EmailStr
-    role: str
-    password: str
-    otp: Optional[str] = None
-    otpExpiry: Optional[str] = None
 
 @router.post("/add-user")
-async def add_user(user: UserCreate, db: Session = Depends(get_db)):
+async def add_user(user: modelsp.Users, db: Session = Depends(get_db)):
     try:
         # Check if email already exists
         existing_user_email = (
