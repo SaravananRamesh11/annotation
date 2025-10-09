@@ -10,14 +10,15 @@ from router import admin_router
 from fastapi.middleware.cors import CORSMiddleware
 
 
+
 models.database_models.Base.metadata.create_all(bind=engine)
 
 
 app = FastAPI()
 
 origins = [
-    "http://localhost:5173"
- 
+    "http://localhost:3000",  # React frontend
+    "http://localhost:5173"   # Vite frontend (if you use it)
 ]
 
 # 2. Add the CORSMiddleware to your app
