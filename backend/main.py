@@ -50,9 +50,9 @@ DARSHINI_HASH = hash_password("darshini")
 # Define your user objects using the hashed passwords
 users = [
     modelsp.Users(id="VISTA0001", name="sarva", email="saravananramesh102002@gmail.com", role="admin", password=SARVA_HASH, otp=None, otpExpiry=None),
-    modelsp.Users(id="VISTA0002", name="hemanth", email="hamanthmoorthi77@gmail.com", role="annotator", password=HEMANTH_HASH, otp=None, otpExpiry=None),
-    modelsp.Users(id="VISTA0003", name="mohana", email="mohanapriya7114@gmail.com", role="reviewer", password=MOHANA_HASH, otp=None, otpExpiry=None),
-    modelsp.Users(id="VISTA0004", name="darshini", email="dharshiniramu78@gmail.com", role="annotator", password=DARSHINI_HASH, otp=None, otpExpiry=None),
+    modelsp.Users(id="VISTA0002", name="hemanth", email="hamanthmoorthi77@gmail.com", role="employee", password=HEMANTH_HASH, otp=None, otpExpiry=None),
+    modelsp.Users(id="VISTA0003", name="mohana", email="mohanapriya7114@gmail.com", role="employee", password=MOHANA_HASH, otp=None, otpExpiry=None),
+    modelsp.Users(id="VISTA0004", name="darshini", email="dharshiniramu78@gmail.com", role="employee", password=DARSHINI_HASH, otp=None, otpExpiry=None),
 ]
 
 
