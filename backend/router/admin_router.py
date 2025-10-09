@@ -1,13 +1,14 @@
 from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form
 from sqlalchemy.orm import Session
 from database import get_db
+from sqlalchemy.dialects.postgresql import JSONB
 from models import database_models
 from dotenv import load_dotenv
 import  uuid,os
 from utils import s3_connection
 from botocore.exceptions import NoCredentialsError
 from typing import List
-
+from models import modelsp
 
 
 load_dotenv()
@@ -67,6 +68,54 @@ async def upload_files_to_s3(
     except Exception as e:
         print("Error uploading to S3:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+@router.post("/create_project")
+def create_project(request: modelsp.ProjectCreate, db: Session = Depends(get_db)):
+    # Check if a project with the same name exists (optional)
+    existing = db.query(database_models.Project).filter(database_models.Project.name == request.project_name).first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project name already exists")
+
+    new_project = database_models.Project(
+        name=request.project_name,
+        description=request.description,
+        classes=request.classes
+    )
+    db.add(new_project)
+    db.commit()
+    db.refresh(new_project)
+
+    return {
+        "message": "Project created successfully",
+        "project": {
+            "id": new_project.id,
+            "name": new_project.name,
+            "description": new_project.description,
+            "classes": new_project.classes,
+            "created_at": new_project.created_at
+        }
+    }
+
+
+@router.get("/get_all_projects")
+def get_all_projects(db: Session = Depends(get_db)):
+    projects = db.query(database_models.Project).all()
+    return [
+        {
+            "id": project.id,
+            "name": project.name,
+            "description": project.description,
+            "classes": project.classes,
+            "created_at": project.created_at,
+            "updated_at": project.updated_at,
+        }
+        for project in projects
+    ]
+
+   
+
+
 
 
 
