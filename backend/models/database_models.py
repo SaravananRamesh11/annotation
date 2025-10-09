@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Enum, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Enum, ForeignKey,JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
@@ -62,7 +62,7 @@ class Files(Base):
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     s3_key = Column(String(255), unique=True, nullable=False, index=True)  # unique S3 key
     type = Column(Enum('image', 'video', name="file_type"), nullable=False)
-    status = Column(Enum('pending', 'assigned', 'completed', name="file_status"), nullable=False, default='pending')
+    status = Column(Enum('pending', 'assigned','review', 'completed', name="file_status"), nullable=False, default='pending')
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -76,7 +76,7 @@ class Annotations(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
     project_member_id = Column(Integer, ForeignKey("project_members.id", ondelete="CASCADE"), nullable=False)
-    data = Column(JSONB, nullable=True)
+    data = Column(JSON, nullable=True)
     started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_saved_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     submitted_at = Column(DateTime(timezone=True), nullable=True)
