@@ -234,3 +234,12 @@ async def add_project_members(data: modelsp.AddProjectMembers, db: Session = Dep
         raise HTTPException(status_code=500, detail=str(e))
 
     return {"message": "Project members added successfully"}
+
+
+# get_all_users endpoint
+@router.get("/get_all_user", response_model=List[modelsp.UserResponse])
+async def get_all_user(db: Session = Depends(get_db)):
+    users = db.query(database_models.Users).all()
+    if not users:
+        raise HTTPException(status_code=404, detail="No users found")
+    return users
