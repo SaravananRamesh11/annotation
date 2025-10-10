@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from database import get_db
 from sqlalchemy.dialects.postgresql import JSONB
@@ -8,7 +9,11 @@ import  uuid,os
 from utils import s3_connection
 from botocore.exceptions import NoCredentialsError
 from typing import List
-from models import modelsp
+from models import modelsp 
+from typing import List, Optional
+from datetime import datetime, timedelta
+import bcrypt
+
 
 
 load_dotenv()
@@ -126,4 +131,123 @@ def get_all_projects(db: Session = Depends(get_db)):
 
 
 
+#Add User end point
 
+
+@router.post("/add-user")
+async def add_user(user: modelsp.Users, db: Session = Depends(get_db)):
+    try:
+        # Check if email already exists
+        existing_user_email = (
+            db.query(database_models.Users)
+            .filter(database_models.Users.email == user.email)
+            .first()
+        )
+        if existing_user_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User with this email already exists.",
+            )
+
+        # Check if user ID already exists
+        existing_user_id = (
+            db.query(database_models.Users)
+            .filter(database_models.Users.id == user.user_id)
+            .first()
+        )
+        if existing_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User with this ID already exists.",
+            )
+
+        # Hash password
+        hashed_password = bcrypt.hashpw(user.password.encode("utf-8"), bcrypt.gensalt())
+
+        # Handle OTP safely
+        otp_value = user.otp.strip() if user.otp and user.otp.strip().lower() != "string" else None
+
+        # Handle OTP expiry safely
+        otp_expiry_value = None
+        if user.otpExpiry and user.otpExpiry.strip().lower() not in ["", "string", "null"]:
+            try:
+                otp_expiry_value = datetime.fromisoformat(user.otpExpiry)
+            except ValueError:
+                try:
+                    otp_expiry_value = datetime.strptime(user.otpExpiry, "%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    otp_expiry_value = None  # Invalid format, store as NULL
+
+        # Create new user
+        new_user = database_models.Users(
+            id=user.user_id,
+            name=user.name,
+            email=user.email,
+            role=user.role,
+            password=hashed_password.decode("utf-8"),
+            otp=otp_value,
+            otpExpiry=otp_expiry_value,
+        )
+
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+
+        return {
+            "message": "User added successfully!",
+            "user": {
+                "id": new_user.id,
+                "name": new_user.name,
+                "email": new_user.email,
+                "role": new_user.role,
+                "otp": new_user.otp,
+                "otpExpiry": new_user.otpExpiry,
+            },
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print("Error adding user:", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+    
+# add_project_members endpoint
+
+@router.post("/add_project_members")
+async def add_project_members(data: modelsp.AddProjectMembers, db: Session = Depends(get_db)):
+    project = db.query(database_models.Project).filter(database_models.Project.name == data.project_name).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    for member in data.members:
+        user = db.query(database_models.Users).filter(database_models.Users.id == member.user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User {member.user_id} not found")
+
+        new_member = database_models.ProjectMember(
+            project_id=project.id,
+            user_id=member.user_id,
+            project_role=member.project_role
+        )
+        db.add(new_member)
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print("Error adding project members:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"message": "Project members added successfully"}
+
+
+# get_all_users endpoint
+@router.get("/get_all_user", response_model=List[modelsp.UserResponse])
+async def get_all_user(db: Session = Depends(get_db)):
+    users = db.query(database_models.Users).all()
+    if not users:
+        raise HTTPException(status_code=404, detail="No users found")
+    return users
