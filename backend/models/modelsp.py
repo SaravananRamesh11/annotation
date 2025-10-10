@@ -36,8 +36,7 @@ class ProjectMemberResponse(BaseModel):
     project_role: str
     joined_at: datetime
 
-    class Config:
-        orm_mode = True
+   
 
 class UserResponse(BaseModel):
     id: str
@@ -45,8 +44,7 @@ class UserResponse(BaseModel):
     email: str
     role: str
 
-    class Config:
-        orm_mode = True
+    
 
 
 

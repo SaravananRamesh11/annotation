@@ -1,18 +1,21 @@
-from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form
+from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form,Query
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from database import get_db
 from sqlalchemy.dialects.postgresql import JSONB
 from models import database_models
 from dotenv import load_dotenv
-import  uuid,os
+import  uuid,os,io
 from utils import s3_connection
-from botocore.exceptions import NoCredentialsError
+from botocore.exceptions import NoCredentialsError,ClientError
 from typing import List
-from models import modelsp 
+from models import modelsp,database_models
 from typing import List, Optional
 from datetime import datetime, timedelta
 import bcrypt
+from fastapi.responses import JSONResponse
+import pandas as pd
+from helper_functions import admin_helper
 
 
 
@@ -34,7 +37,7 @@ async def upload_files_to_s3(
     id: str = Form(...),
     project_name: str = Form(...),
     proofImages: List[UploadFile] = File(...),
-    s3_client=Depends(s3_connection.get_s3_connection),
+    s3_client=Depends(s3_connection.get_s3_connection)
 ):
     uploaded_files = []
 
@@ -251,3 +254,46 @@ async def get_all_user(db: Session = Depends(get_db)):
     if not users:
         raise HTTPException(status_code=404, detail="No users found")
     return users
+
+
+
+@router.get("/projects/{project_id}/files")
+def get_project_files(
+    project_id: int,
+    db: Session = Depends(get_db),
+    s3_client=Depends(s3_connection.get_s3_connection)  # ⬅️ Inject S3 client from your utils module
+):
+    """
+    Given a project ID:
+    1️⃣ Fetch project name from DB
+    2️⃣ List files from S3 working and finished directories
+    3️⃣ Return signed URLs for both
+    """
+
+    BASE_PATH = "annotation/"
+
+    # 1️⃣ Get project name from DB
+    project = db.query(database_models.Project).filter(database_models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project_name = project.name
+    print(f"📁 Fetching files for project: {project_name}")
+
+    # 2️⃣ Build S3 prefixes
+    working_prefix = f"{BASE_PATH}{project_name}/working_directory/"
+    finished_prefix = f"{BASE_PATH}{project_name}/finished_directory/"
+
+    # 3️⃣ List files from both directories
+    working_files = admin_helper.list_files_in_s3(s3_client, working_prefix)
+    finished_files = admin_helper.list_files_in_s3(s3_client, finished_prefix)
+
+    # 4️⃣ Generate signed URLs
+    working_urls = [admin_helper.get_presigned_url(s3_client, key) for key in working_files]
+    finished_urls = [admin_helper.get_presigned_url(s3_client, key) for key in finished_files]
+
+    return {
+        "project_name": project_name,
+        "working_directory": working_urls,
+        "finished_directory": finished_urls
+    }
