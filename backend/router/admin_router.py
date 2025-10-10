@@ -9,11 +9,10 @@ import  uuid,os
 from utils import s3_connection
 from botocore.exceptions import NoCredentialsError
 from typing import List
-from models import modelsp
+from models import modelsp 
 from typing import List, Optional
 from datetime import datetime, timedelta
 import bcrypt
-
 
 
 
@@ -206,3 +205,32 @@ async def add_user(user: modelsp.Users, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )
+    
+# add_project_members endpoint
+
+@router.post("/add_project_members")
+async def add_project_members(data: modelsp.AddProjectMembers, db: Session = Depends(get_db)):
+    project = db.query(database_models.Project).filter(database_models.Project.name == data.project_name).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    for member in data.members:
+        user = db.query(database_models.Users).filter(database_models.Users.id == member.user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User {member.user_id} not found")
+
+        new_member = database_models.ProjectMember(
+            project_id=project.id,
+            user_id=member.user_id,
+            project_role=member.project_role
+        )
+        db.add(new_member)
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print("Error adding project members:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"message": "Project members added successfully"}

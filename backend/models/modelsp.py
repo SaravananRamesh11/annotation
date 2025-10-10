@@ -20,6 +20,25 @@ class ProjectCreate(BaseModel): #http://localhost:8000/api/admin/create_project 
     classes: List[str]
 
 
+class ProjectMemberData(BaseModel):
+    user_id: str                   
+    project_role: str              
+
+class AddProjectMembers(BaseModel):
+    project_name: str
+    members: List[ProjectMemberData] # list of members with user_id & role
+
+
+class ProjectMemberResponse(BaseModel):
+    id: int
+    project_id: int
+    user_id: str
+    project_role: str
+    joined_at: datetime
+
+    class Config:
+        orm_mode = True
+
 
 
    
