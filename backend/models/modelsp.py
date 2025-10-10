@@ -39,6 +39,15 @@ class ProjectMemberResponse(BaseModel):
     class Config:
         orm_mode = True
 
+class UserResponse(BaseModel):
+    id: str
+    name: str
+    email: str
+    role: str
+
+    class Config:
+        orm_mode = True
+
 
 
    
