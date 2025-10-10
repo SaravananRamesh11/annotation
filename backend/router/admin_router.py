@@ -25,8 +25,6 @@ AWS_REGION =   os.getenv("AWS_REGION")
 BUCKET_NAME =  os.getenv("BUCKET_NAME")
 
 
-FOLDER_PATH_TO_UPLOAD_FILES = "annotation/working_directory/"
-
 router = APIRouter(prefix="/api/admin", tags=["auth"])
 
 
@@ -34,46 +32,56 @@ router = APIRouter(prefix="/api/admin", tags=["auth"])
 @router.post("/upload-to-s3")
 async def upload_files_to_s3(
     id: str = Form(...),
-    resolution: str = Form(...),
+    project_name: str = Form(...),
     proofImages: List[UploadFile] = File(...),
     s3_client=Depends(s3_connection.get_s3_connection),
 ):
     uploaded_files = []
-    print("Received files:", proofImages)
-    for f in proofImages:
-        print("filename:", f.filename, "file object:", f.file)
 
     try:
+        print("🟢 Received form fields:")
+        print(f"id={id}")
+        print(f"project_name={project_name}")
+        print(f"proofImages count={len(proofImages)}")
+
+        # --- Create finished_directory for the project ---
+        finished_dir_key = f"annotation/{project_name}/finished_directory/"
+        s3_client.put_object(Bucket=BUCKET_NAME, Key=finished_dir_key)
+        print(f"✅ Created empty directory: {finished_dir_key}")
+
+        # --- Upload files to working_directory ---
         for file in proofImages:
-            if file.filename is None or file.file is None:
-                print("Skipping invalid file:", file)
+            if not file.filename:
                 continue
 
-            print("Uploading:", file.filename)
             file_extension = os.path.splitext(file.filename)[1]
             unique_name = f"{uuid.uuid4().hex}{file_extension}"
-            s3_key = f"{FOLDER_PATH_TO_UPLOAD_FILES}{unique_name}"
 
-            file.file.seek(0)  # Make sure stream is at the beginning
-            s3_client.upload_fileobj(file.file, BUCKET_NAME, s3_key)
+            s3_key = f"annotation/{project_name}/working_directory/{unique_name}"
+
+            file.file.seek(0)
+            s3_client.upload_fileobj(
+                file.file,
+                BUCKET_NAME,
+                s3_key,
+                ExtraArgs={'ContentType': file.content_type}
+            )
 
             file_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
             uploaded_files.append(file_url)
 
-
         return {
             "message": "Files uploaded successfully!",
             "ticket_id": id,
-            "resolution": resolution,
+            "project_name": project_name,
             "file_urls": uploaded_files,
         }
 
     except NoCredentialsError:
         raise HTTPException(status_code=403, detail="AWS credentials not found")
     except Exception as e:
-        print("Error uploading to S3:", str(e))
         raise HTTPException(status_code=500, detail=str(e))
-    
+
 
 @router.post("/create_project")
 def create_project(request: modelsp.ProjectCreate, db: Session = Depends(get_db)):
