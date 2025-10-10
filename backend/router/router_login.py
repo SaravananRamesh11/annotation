@@ -7,6 +7,7 @@ import jwt
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os
+from helper_functions import login_helper
 
 
 router = APIRouter(prefix="/api/general", tags=["auth"])
@@ -20,12 +21,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 60))
 
 
 
-def create_access_token(data: dict, expires_delta: int = ACCESS_TOKEN_EXPIRE_MINUTES):
-    to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=expires_delta)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+
 
 
 @router.post("/login")
@@ -52,7 +48,7 @@ async def login_user(request: Request, db: Session = Depends(get_db)):
 
     # 3️⃣ Create JWT token with payload (id, role)
     token_data = {"id": user.id, "role": user.role}
-    token = create_access_token(token_data)
+    token = login_helper.create_access_token(token_data)
 
     # 4️⃣ Return token
     return {"access_token": token, "token_type": "bearer"}
