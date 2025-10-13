@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form,Query
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import func, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy import select, update
+from sqlalchemy.orm import Session,aliased
 from database import get_db
 from sqlalchemy.dialects.postgresql import JSONB
 from models import database_models
@@ -17,6 +17,7 @@ import bcrypt
 from fastapi.responses import JSONResponse
 import pandas as pd
 from helper_functions import admin_helper
+
 
 
 
@@ -430,32 +431,36 @@ def annotation(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    
 
 
-@router.get("/annotators/{project_id}", response_model=list[modelsp.AnnotatorOut])
-def get_annotators(project_id: int, db: Session = Depends(get_db)):
-    try:
-        # Subquery: Find user_ids who have multiple roles in the same project
-        multi_role_users = db.query(database_models.ProjectMember.user_id).filter(
-            database_models.ProjectMember.project_id == project_id
-        ).group_by(database_models.ProjectMember.user_id).having(
-            func.count(database_models.ProjectMember.project_role) > 1
-        ).subquery()
+@router.get("/{project_id}/available-users")
+def get_users_not_in_project(project_id: int, db: Session = Depends(get_db)):
+    pm_alias = aliased(database_models.ProjectMember)
+    query = (
+        db.query(database_models.Users)
+        .outerjoin(pm_alias, (pm_alias.user_id == database_models.Users.id) & (pm_alias.project_id == project_id))
+        .filter(pm_alias.id.is_(None))
+    )
+    users = query.all()
 
-        # Main query: Get annotators who are NOT in the multi-role list
-        annotators = db.query(database_models.ProjectMember).filter(
-            database_models.ProjectMember.project_id == project_id,
-            database_models.ProjectMember.project_role == "annotator",
-            ~database_models.ProjectMember.user_id.in_(multi_role_users)
-        ).all()
+    return [
+        {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "role": user.role
+        }
+        for user in users
+    ]
+    
 
-        if not annotators:
-            raise HTTPException(status_code=404, detail="No annotators found for this project")
 
-        return [modelsp.AnnotatorOut.from_orm(a) for a in annotators]
 
-    except Exception as e:
-        print("❌ ERROR:", e)
-        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+
 
 

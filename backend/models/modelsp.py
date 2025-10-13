@@ -45,14 +45,7 @@ class UserResponse(BaseModel):
     role: str
 
     
-class AnnotatorOut(BaseModel):
-    id: int
-    user_id: str
-    project_role: str
-    joined_at: datetime
 
-    class Config:
-        from_attributes = True
 
 
    
