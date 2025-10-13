@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form,Query
 from pydantic import BaseModel, EmailStr
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 from database import get_db
 from sqlalchemy.dialects.postgresql import JSONB
@@ -11,7 +12,7 @@ from botocore.exceptions import NoCredentialsError,ClientError
 from typing import List
 from models import modelsp,database_models
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import bcrypt
 from fastapi.responses import JSONResponse
 import pandas as pd
@@ -345,3 +346,89 @@ def get_project_files(
         "working_directory": working_urls,
         "finished_directory": finished_urls
     }
+
+@router.post("/annotation_table")
+def annotation(
+    file_id: int,
+    project_member_id: int,
+    db: Session = Depends(get_db),
+    s3_client=Depends(s3_connection.get_s3_connection)
+):
+    try:
+        # Check if this file is already assigned
+        existing_annotation = db.execute(
+            select(database_models.Annotations).where(database_models.Annotations.file_id == file_id)
+        ).scalar_one_or_none()
+
+        if existing_annotation:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File ID {file_id} is already assigned to Project Member ID {existing_annotation.project_member_id}"
+            )
+
+        # Fetch the file record from DB
+        file_record = db.query(database_models.Files).filter(database_models.Files.id == file_id).first()
+        if not file_record:
+            raise HTTPException(status_code=404, detail=f"File ID {file_id} not found")
+
+        # Create new annotation entry
+        new_annotation = database_models.Annotations(
+            file_id=file_id,
+            project_member_id=project_member_id,
+            assigned_at=datetime.now(timezone.utc),
+            data=None,
+            started_at=None,
+            last_saved_at=None,
+            submitted_at=None
+        )
+        db.add(new_annotation)
+
+        # Update file status to 'assigned'
+        db.execute(
+            update(database_models.Files)
+            .where(database_models.Files.id == file_id)
+            .values(status="assigned")
+        )
+
+        # --- Move file in S3 from raw → assigned ---
+        project_name = file_record.project.name
+        filename = os.path.basename(file_record.s3_key)  # ensure just the filename
+
+        raw_key = f"annotation/{project_name}/working_directory/raw/{filename}"
+        assigned_key = f"annotation/{project_name}/working_directory/assigned/{filename}"
+
+        try:
+            # Check if raw file exists
+            s3_client.head_object(Bucket=BUCKET_NAME, Key=raw_key)
+
+            # Copy to assigned folder
+            s3_client.copy_object(
+                Bucket=BUCKET_NAME,
+                CopySource={'Bucket': BUCKET_NAME, 'Key': raw_key},
+                Key=assigned_key
+            )
+
+            # Delete from raw folder
+            s3_client.delete_object(Bucket=BUCKET_NAME, Key=raw_key)
+            print(f"✅ Moved S3 file {raw_key} → {assigned_key}")
+
+        except ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                raise HTTPException(status_code=404, detail=f"S3 file not found: {raw_key}")
+            else:
+                raise HTTPException(status_code=500, detail=f"Failed to move file in S3: {str(e)}")
+
+        db.commit()
+        db.refresh(new_annotation)
+
+        return {
+            "message": "Annotation created successfully",
+            "annotation_id": new_annotation.id,
+            "assigned_at": new_annotation.assigned_at
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
