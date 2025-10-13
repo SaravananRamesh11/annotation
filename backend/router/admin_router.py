@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form,Query
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session,aliased
 from database import get_db
 from sqlalchemy.dialects.postgresql import JSONB
 from models import database_models
@@ -17,6 +17,7 @@ import bcrypt
 from fastapi.responses import JSONResponse
 import pandas as pd
 from helper_functions import admin_helper
+
 
 
 
@@ -430,5 +431,36 @@ def annotation(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+
+@router.get("/{project_id}/available-users")
+def get_users_not_in_project(project_id: int, db: Session = Depends(get_db)):
+    pm_alias = aliased(database_models.ProjectMember)
+    query = (
+        db.query(database_models.Users)
+        .outerjoin(pm_alias, (pm_alias.user_id == database_models.Users.id) & (pm_alias.project_id == project_id))
+        .filter(pm_alias.id.is_(None))
+    )
+    users = query.all()
+
+    return [
+        {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "role": user.role
+        }
+        for user in users
+    ]
+    
+
+
+
+
+
+
+
+
 
 
