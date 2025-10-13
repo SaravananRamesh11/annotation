@@ -81,15 +81,3 @@ init_db()
 
 app.include_router(router_login.router)
 app.include_router(admin_router.router)
-
-
-
-
-
-
-
-
-
-
-
-
