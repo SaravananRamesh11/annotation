@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Request, Depends, HTTPException, status
+from pytz import timezone
 from sqlalchemy.orm import Session
 from database import get_db
 from models import database_models  
@@ -52,5 +53,6 @@ async def login_user(request: Request, db: Session = Depends(get_db)):
 
     # 4️⃣ Return token
     return {"access_token": token, "token_type": "bearer"}
+
 
 
