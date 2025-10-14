@@ -44,7 +44,14 @@ class UserResponse(BaseModel):
     email: str
     role: str
 
-    
+class ProjectMemberOut(BaseModel):
+    user_id: str
+    project_id: int
+    project_role: str
+    joined_at: datetime
+
+    class Config:
+        orm_mode = True
 
 
 
