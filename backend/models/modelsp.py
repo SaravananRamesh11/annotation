@@ -54,6 +54,13 @@ class ProjectMemberOut(BaseModel):
         orm_mode = True
 
 
+class AnnotatorOut(BaseModel):
+    user_id: str
+    project_role: str
+    joined_at: datetime
+
+    class Config:
+        from_attributes = True
 
    
 
