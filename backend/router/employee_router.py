@@ -126,10 +126,13 @@ def assign_random_file(project_id: int, employee_id: str, db: Session = Depends(
     db.add(new_annotation)
     db.commit()
 
+    file_url = f"https://{BUCKET_NAME}.s3.eu-north-1.amazonaws.com/{assigned_key}"
+
     return {
         "message": "File assigned successfully",
         "employee_id": employee_id,
-        "file_assigned": assigned_key
+        "file_assigned": assigned_key,
+        "file_url": file_url
     }
 
 
