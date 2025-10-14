@@ -24,12 +24,8 @@ dist-ssr
 *.sln
 *.sw?
 
-
-.env
-venvv/
+myenv/
 __pycache__/
-cp.py
-notes.txt
-
-
+.env
+.env.local
 
