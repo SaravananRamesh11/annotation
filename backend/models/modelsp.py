@@ -64,3 +64,5 @@ class AnnotatorOut(BaseModel):
 
    
 
+class PromoteRequest(BaseModel):
+    user_ids: List[str]
