@@ -28,4 +28,5 @@ myenv/
 __pycache__/
 .env
 .env.local
-
+cp.py
+notes.txt
