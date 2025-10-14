@@ -1,0 +1,118 @@
+about git 
+--------------
+Once your current branch is fully committed, you can freely switch to any other branch without any issues.
+
+🧠 If you have uncommited changes you can only switch branches if your uncommitted changes don’t conflict with the files in the branch 
+you’re switching to.
+
+goal:you need to go to any branch freely
+
+lets say you have uncommited changes in ur branch,so now you want to commit the changes in your current branch
+for that you need to check what are the changes that has been made so that you can make decision of to commit
+the uncommitted changes or remove the uncommited changes.
+
+so use:
+>git status            
+>git diff              
+
+
+git status: See what are the files that are  modified or added new
+git diff:  Review exactly what changed inside a particular file,Shows line-by-line differences
+            eg:      -    resolution: str = Form(...),
+                     +    project_name: str = Form(...),
+
+                     - line is removed
+                     + line is added
+
+so now you can easily what has changed inside a folder and take a decision to commit them or not.
+
+
+
+Edge casee: you dont want to commit the code in your current branch but still want to move to other branches 
+(not committed the code in current branch)
+
+you can do so , > "git stash"
+
+git stash : “Temporarily hide my uncommitted changes so I can work cleanly.” -> temporarily hide the uncommitted 
+changes.
+
+So now you can switch to other branches
+
+again you want the changes that are temporarily hidden by git stash then use > "git stash pop"
+
+
+
+
+1.git branch -d sarva_9/10/25
+If the commits from sarva_9/10/25 were already merged into main, it’ll delete it safely.
+Otherwise, you’ll get:
+
+error: The branch 'sarva_9/10/25' is not fully merged.
+If you are sure you want to delete it, run 'git branch -D sarva_9/10/25'.
+
+
+2.git branch -D sarva_9/10/25
+Force delete (dangerous)
+
+The capital -D is shorthand for --delete --force.
+
+Git skips the safety check and deletes the branch even if it has unmerged commits.
+
+This means any commits unique to that branch will be lost forever (unless recoverable via reflog).
+
+
+
+                            About git switch
+                            __________________
+
+1.git switch <remote_repo>
+  git checkout -b <new_repo>
+
+git switch is used to determine which remote repo should be used as a base to create the 
+new repo in the command ->   git checkout -b <new_repo>
+
+
+
+
+                            About git worktree
+                            ___________________
+1. git worktree list (list all the worktree and the branch associated with them)
+
+2.error:(venvv) PS F:\annotation\backend> git branch -D sarva-14/10/25
+        error: cannot delete branch 'sarva-14/10/25' used by worktree at 'F:/annotation'
+
+        do -> git switch main
+
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+project members table
+
+id	project_id	user_id	role	joined_at
+1	1	u001	annotator	2025-10-08
+2	1	u002	reviewer	2025-10-08
+3	2	u003	annotator	2025-10-08
