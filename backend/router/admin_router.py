@@ -482,9 +482,27 @@ def get_annotators(project_id: int, db: Session = Depends(get_db)):
         print("❌ ERROR:", e)
         raise HTTPException(status_code=500, detail=str(e))
     
+# endpoint for promoting multiple annotators
+@router.put("/annotators/{project_id}/promote", response_model=dict)
+def promote_multiple_annotators_to_editors(project_id: int, request: modelsp.PromoteRequest, db: Session = Depends(get_db)):
+    try:
+        # Update all annotators in the given list
+        updated_count = db.query(database_models.ProjectMember).filter(
+            database_models.ProjectMember.project_id == project_id,
+            database_models.ProjectMember.user_id.in_(request.user_ids),
+            database_models.ProjectMember.project_role == "annotator"
+        ).update({database_models.ProjectMember.project_role: "editor"}, synchronize_session=False)
 
+        if updated_count == 0:
+            raise HTTPException(status_code=404, detail="No matching annotators found to update")
 
+        db.commit()
 
+        return {"message": f"{updated_count} annotator(s) promoted to editor successfully"}
+
+    except Exception as e:
+        print("❌ ERROR:", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 
