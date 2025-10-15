@@ -1,7 +1,8 @@
 from pydantic import BaseModel
 from datetime import datetime
-from typing import Optional,List, Any
+from typing import Optional,List, Any, Dict
 from sqlalchemy.dialects.postgresql import JSONB
+
 
 class Users(BaseModel):
     id:str 
@@ -17,7 +18,13 @@ class Users(BaseModel):
 class ProjectCreate(BaseModel): #http://localhost:8000/api/admin/create_project   "for request" of the post request
     project_name: str
     description: str | None = None
-    classes: List[str]
+    classes: List[Dict[str, Any]]
+
+
+
+  
+
+
 
 
 class ProjectMemberData(BaseModel):
