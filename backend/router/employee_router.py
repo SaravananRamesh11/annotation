@@ -113,7 +113,7 @@ def assign_random_file(project_id: int, employee_id: str, db: Session = Depends(
     if not file_record:
         raise HTTPException(status_code=404, detail="File record not found in database")
 
-    file_record.s3_key = assigned_key
+    #file_record.s3_key = assigned_key
     file_record.status = "assigned"
     db.commit()
     db.refresh(file_record)
@@ -121,7 +121,8 @@ def assign_random_file(project_id: int, employee_id: str, db: Session = Depends(
     # Step 8: Create new annotation record
     new_annotation = database_models.Annotations(
         file_id=file_record.id,
-        project_member_id=project_member.id
+        project_member_id=project_member.id,
+        assigned_by="random"
     )
     db.add(new_annotation)
     db.commit()
