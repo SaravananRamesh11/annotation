@@ -93,7 +93,7 @@ class Annotations(Base):
     file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
     project_member_id = Column(Integer, ForeignKey("project_members.id", ondelete="CASCADE"), nullable=False)
     data = Column(JSON, nullable=True)
-    assigned_by = Column(Enum('admin', 'random', name="assign1ed_type"), nullable=False),
+    assigned_by = Column(Enum('admin', 'random', name="assign1ed_type"), nullable=False)
     assigned_at = Column(DateTime(timezone=True), server_default=func.now())
     started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_saved_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

@@ -73,3 +73,7 @@ class AnnotatorOut(BaseModel):
 
 class PromoteRequest(BaseModel):
     user_ids: List[str]
+
+class AnnotationRequest(BaseModel):
+    file_id: int
+    project_member_id: int
