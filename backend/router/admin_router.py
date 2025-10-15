@@ -378,6 +378,7 @@ def annotation(
             project_member_id=project_member_id,
             assigned_at=datetime.now(timezone.utc),
             data=None,
+            assigned_by='admin',
             started_at=None,
             last_saved_at=None,
             submitted_at=None
