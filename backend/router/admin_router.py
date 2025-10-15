@@ -503,8 +503,7 @@ def promote_multiple_annotators_to_editors(project_id: int, request: modelsp.Pro
     except Exception as e:
         print("❌ ERROR:", e)
         raise HTTPException(status_code=500, detail=str(e))
-
-
+    
 
 
 
