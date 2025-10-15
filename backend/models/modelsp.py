@@ -18,7 +18,7 @@ class Users(BaseModel):
 class ProjectCreate(BaseModel): #http://localhost:8000/api/admin/create_project   "for request" of the post request
     project_name: str
     description: str | None = None
-    classes: List[Dict[str, Any]]
+    classes: list[str] #List[Dict[str, Any]]
 
 
 
