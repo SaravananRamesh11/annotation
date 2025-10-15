@@ -4,7 +4,6 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session,aliased
 from database import get_db
 from sqlalchemy.dialects.postgresql import JSONB
-from models import database_models
 from dotenv import load_dotenv
 import  uuid,os,io
 from utils import s3_connection
@@ -350,32 +349,33 @@ def get_project_files(
 
 @router.post("/annotation_table")
 def annotation(
-    file_id: int,
-    project_member_id: int,
+    # file_id: int,
+    # project_member_id: int,
+    request: modelsp.AnnotationRequest,
     db: Session = Depends(get_db),
     s3_client=Depends(s3_connection.get_s3_connection)
 ):
     try:
         # Check if this file is already assigned
         existing_annotation = db.execute(
-            select(database_models.Annotations).where(database_models.Annotations.file_id == file_id)
+            select(database_models.Annotations).where(database_models.Annotations.file_id == request.file_id)
         ).scalar_one_or_none()
 
         if existing_annotation:
             raise HTTPException(
                 status_code=400,
-                detail=f"File ID {file_id} is already assigned to Project Member ID {existing_annotation.project_member_id}"
+                detail=f"File ID {request.file_id} is already assigned to Project Member ID {existing_annotation.project_member_id}"
             )
 
         # Fetch the file record from DB
-        file_record = db.query(database_models.Files).filter(database_models.Files.id == file_id).first()
+        file_record = db.query(database_models.Files).filter(database_models.Files.id == request.file_id).first()
         if not file_record:
-            raise HTTPException(status_code=404, detail=f"File ID {file_id} not found")
+            raise HTTPException(status_code=404, detail=f"File ID {request.file_id} not found")
 
         # Create new annotation entry
         new_annotation = database_models.Annotations(
-            file_id=file_id,
-            project_member_id=project_member_id,
+            file_id=request.file_id,
+            project_member_id=request.project_member_id,
             assigned_at=datetime.now(timezone.utc),
             data=None,
             assigned_by='admin',
@@ -388,7 +388,7 @@ def annotation(
         # Update file status to 'assigned'
         db.execute(
             update(database_models.Files)
-            .where(database_models.Files.id == file_id)
+            .where(database_models.Files.id == request.file_id)
             .values(status="assigned")
         )
 
