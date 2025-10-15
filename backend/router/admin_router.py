@@ -283,7 +283,7 @@ async def add_project_members(data: modelsp.AddProjectMembers, db: Session = Dep
         new_member = database_models.ProjectMember(
             project_id=project.id,
             user_id=member.user_id,
-            project_role=member.project_role
+            project_role="annotator"
         )
         db.add(new_member)
 
