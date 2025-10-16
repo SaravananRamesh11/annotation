@@ -525,4 +525,40 @@ def promote_multiple_annotators_to_editors(project_id: int, request: modelsp.Pro
     except Exception as e:
         print("❌ ERROR:", e)
         raise HTTPException(status_code=500, detail=str(e))
-    
+
+# endpoint to display all the members in project
+@router.post("/projects/members", response_model=list[dict])
+def get_project_members(request: modelsp.ProjectRequest, db: Session = Depends(get_db)):
+    try:
+        # Step 1: Join ProjectMember and Users tables
+        members = (
+            db.query(
+                database_models.ProjectMember.user_id,
+                database_models.Users.name,
+                database_models.ProjectMember.project_role
+            )
+            .join(
+                database_models.Users,
+                database_models.Users.id == database_models.ProjectMember.user_id
+            )
+            .filter(database_models.ProjectMember.project_id == request.project_id)
+            .all()
+        )
+
+        # Step 2: Handle no results found
+        if not members:
+            raise HTTPException(status_code=404, detail="No members found for this project")
+
+        # Step 3: Return formatted output
+        return [
+            {
+                "user_id": member.user_id,
+                "name": member.name,
+                "project_role": member.project_role
+            }
+            for member in members
+        ]
+
+    except Exception as e:
+        print("❌ ERROR:", e)
+        raise HTTPException(status_code=500, detail=str(e))
