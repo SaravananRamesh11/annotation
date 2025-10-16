@@ -20,6 +20,9 @@ class ProjectCreate(BaseModel): #http://localhost:8000/api/admin/create_project 
     description: str | None = None
     classes: list[str] #List[Dict[str, Any]]
 
+    
+
+
 
 
   
@@ -73,3 +76,10 @@ class AnnotatorOut(BaseModel):
 
 class PromoteRequest(BaseModel):
     user_ids: List[str]
+
+
+
+
+class AnnotationRequest(BaseModel):
+    file_id: int
+    user_id: str

@@ -1,10 +1,10 @@
+import traceback
 from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form,Query
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session,aliased
 from database import get_db
 from sqlalchemy.dialects.postgresql import JSONB
-from models import database_models
 from dotenv import load_dotenv
 import  uuid,os,io
 from utils import s3_connection
@@ -205,7 +205,7 @@ async def add_user(user: modelsp.Users, db: Session = Depends(get_db)):
         # Check if user ID already exists
         existing_user_id = (
             db.query(database_models.Users)
-            .filter(database_models.Users.id == user.user_id)
+            .filter(database_models.Users.id == user.id)
             .first()
         )
         if existing_user_id:
@@ -233,7 +233,7 @@ async def add_user(user: modelsp.Users, db: Session = Depends(get_db)):
 
         # Create new user
         new_user = database_models.Users(
-            id=user.user_id,
+            id=user.id,
             name=user.name,
             email=user.email,
             role=user.role,
@@ -306,7 +306,6 @@ async def get_all_user(db: Session = Depends(get_db)):
     return users
 
 
-
 @router.get("/projects/{project_id}/files")
 def get_project_files(
     project_id: int,
@@ -348,54 +347,84 @@ def get_project_files(
         "finished_directory": finished_urls
     }
 
+@router.get("/{project_id}/available-users")
+def get_users_not_in_project(project_id: int, db: Session = Depends(get_db)):
+    pm_alias = aliased(database_models.ProjectMember)
+    query = (
+        db.query(database_models.Users)
+        .outerjoin(pm_alias, (pm_alias.user_id == database_models.Users.id) & (pm_alias.project_id == project_id))
+        .filter(pm_alias.id.is_(None))
+    )
+    users = query.all()
+
+    return [
+        {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "role": user.role
+        }
+        for user in users
+    ]
+
+
+
+
 @router.post("/annotation_table")
+# #for using this in the frontend, first show all the files in a particular project.
+# #side button allows the admin to assign the file to only one person at a time directs the admin to next page
+# #in the next page it shows all the annotators and reviewers in the project
+# #they can select one person and assign the file to that person
 def annotation(
-    file_id: int,
-    project_member_id: int,
+    request: modelsp.AnnotationRequest,
     db: Session = Depends(get_db),
     s3_client=Depends(s3_connection.get_s3_connection)
 ):
     try:
-        # Check if this file is already assigned
+        # Step 1: Check if this file is already assigned
         existing_annotation = db.execute(
-            select(database_models.Annotations).where(database_models.Annotations.file_id == file_id)
+            select(database_models.Annotations).where(database_models.Annotations.file_id == request.file_id)
         ).scalar_one_or_none()
 
         if existing_annotation:
             raise HTTPException(
                 status_code=400,
-                detail=f"File ID {file_id} is already assigned to Project Member ID {existing_annotation.project_member_id}"
+                detail=f"File ID {request.file_id} is already assigned to User ID {existing_annotation.user_id}"
             )
 
-        # Fetch the file record from DB
-        file_record = db.query(database_models.Files).filter(database_models.Files.id == file_id).first()
+        # Step 2: Fetch the file record from DB
+        file_record = db.query(database_models.Files).filter(database_models.Files.id == request.file_id).first()
         if not file_record:
-            raise HTTPException(status_code=404, detail=f"File ID {file_id} not found")
+            raise HTTPException(status_code=404, detail=f"File ID {request.file_id} not found")
 
-        # Create new annotation entry
+        # Step 2b: Fetch the project name from Project table using project_id
+        project = db.query(database_models.Project).filter(database_models.Project.id == file_record.project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail=f"Project for File ID {request.file_id} not found")
+        project_name = project.name
+
+        # Step 3: Create new annotation entry
         new_annotation = database_models.Annotations(
-            file_id=file_id,
-            project_member_id=project_member_id,
+            file_id=request.file_id,
+            user_id=request.user_id,
             assigned_at=datetime.now(timezone.utc),
             data=None,
             assigned_by='admin',
-            started_at=None,
-            last_saved_at=None,
+            started_at=datetime.now(timezone.utc),
+            last_saved_at=datetime.now(timezone.utc),
             submitted_at=None
         )
         db.add(new_annotation)
 
-        # Update file status to 'assigned'
+        # Step 4: Update file status to 'assigned'
         db.execute(
             update(database_models.Files)
-            .where(database_models.Files.id == file_id)
+            .where(database_models.Files.id == request.file_id)
             .values(status="assigned")
         )
 
-        # --- Move file in S3 from raw → assigned ---
-        project_name = file_record.project.name
-        filename = os.path.basename(file_record.s3_key)  # ensure just the filename
-
+        # --- Step 5: Move file in S3 from raw → assigned ---
+        filename = os.path.basename(file_record.s3_key)
         raw_key = f"annotation/{project_name}/working_directory/raw/{filename}"
         assigned_key = f"annotation/{project_name}/working_directory/assigned/{filename}"
 
@@ -420,6 +449,7 @@ def annotation(
             else:
                 raise HTTPException(status_code=500, detail=f"Failed to move file in S3: {str(e)}")
 
+        # Step 6: Commit transaction
         db.commit()
         db.refresh(new_annotation)
 
@@ -435,25 +465,16 @@ def annotation(
     
 
 
-@router.get("/{project_id}/available-users")
-def get_users_not_in_project(project_id: int, db: Session = Depends(get_db)):
-    pm_alias = aliased(database_models.ProjectMember)
-    query = (
-        db.query(database_models.Users)
-        .outerjoin(pm_alias, (pm_alias.user_id == database_models.Users.id) & (pm_alias.project_id == project_id))
-        .filter(pm_alias.id.is_(None))
-    )
-    users = query.all()
+1
 
-    return [
-        {
-            "id": user.id,
-            "name": user.name,
-            "email": user.email,
-            "role": user.role
-        }
-        for user in users
-    ]
+
+
+
+
+
+
+
+
 
 
 # end point to get annotators for a project, excluding those with multiple roles(editor)
@@ -505,8 +526,3 @@ def promote_multiple_annotators_to_editors(project_id: int, request: modelsp.Pro
         print("❌ ERROR:", e)
         raise HTTPException(status_code=500, detail=str(e))
     
-
-
-
-
-
