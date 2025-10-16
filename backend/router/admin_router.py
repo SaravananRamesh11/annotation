@@ -465,8 +465,6 @@ def annotation(
     
 
 
-1
-
 
 
 
@@ -525,9 +523,10 @@ def promote_multiple_annotators_to_editors(project_id: int, request: modelsp.Pro
     except Exception as e:
         print("❌ ERROR:", e)
         raise HTTPException(status_code=500, detail=str(e))
+    
 
-# endpoint to display all the members in project
-@router.post("/projects/members", response_model=list[dict])
+# endpoint to display all the members in project    
+@router.post("/projects/members", response_model=dict)
 def get_project_members(request: modelsp.ProjectRequest, db: Session = Depends(get_db)):
     try:
         # Step 1: Join ProjectMember and Users tables
@@ -549,8 +548,8 @@ def get_project_members(request: modelsp.ProjectRequest, db: Session = Depends(g
         if not members:
             raise HTTPException(status_code=404, detail="No members found for this project")
 
-        # Step 3: Return formatted output
-        return [
+        # Step 3: Format members list
+        member_list = [
             {
                 "user_id": member.user_id,
                 "name": member.name,
@@ -559,6 +558,13 @@ def get_project_members(request: modelsp.ProjectRequest, db: Session = Depends(g
             for member in members
         ]
 
+        # Step 4: Return both count and members
+        return {
+            "member_count": len(member_list),
+            "members": member_list
+        }
+
     except Exception as e:
         print("❌ ERROR:", e)
         raise HTTPException(status_code=500, detail=str(e))
+
