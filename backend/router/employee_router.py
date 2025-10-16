@@ -16,27 +16,49 @@ AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
 AWS_REGION =   os.getenv("AWS_REGION")
 BUCKET_NAME =  os.getenv("BUCKET_NAME")
 
-# Get all projects assigned to a user
-@router.get("user_projects/{user_id}")
-def get_user_projects(user_id: str, db: Session = Depends(get_db)):
-    from models.database_models import Project, ProjectMember
 
-    results = (
-        db.query(Project.name)
-        .select_from(ProjectMember)
-        .join(Project, Project.id == ProjectMember.project_id)
-        .filter(ProjectMember.user_id == user_id)
+
+
+@router.get("/user_projects/{user_id}")
+def get_user_projects(user_id: str, db: Session = Depends(get_db)):
+    # Step 1: Get all project IDs for this user from ProjectMember
+    project_ids = (
+        db.query(database_models.ProjectMember.project_id)
+        .filter(database_models.ProjectMember.user_id == user_id)
         .all()
     )
 
-    if not results:
+    # Flatten list of tuples to a simple list of IDs
+    project_ids = [pid[0] for pid in project_ids]
+
+    if not project_ids:
         raise HTTPException(status_code=404, detail="No projects found for this user")
 
-    return [r.name for r in results]
+    # Step 2: Fetch all projects using the IDs
+    projects = db.query(database_models.Project).filter(database_models.Project.id.in_(project_ids)).all()
+
+    # Step 3: Return detailed project info
+    return [
+        {
+            "project_id": project.id,
+            "name": project.name,
+            "description": project.description,
+            "classes": project.classes,
+            "created_at": project.created_at,
+            "updated_at": project.updated_at
+        }
+        for project in projects
+    ]
+
+
 
 @router.get("/{project_id}/assign-file/{employee_id}")
-def assign_random_file(project_id: int, employee_id: str, db: Session = Depends(get_db), s3=Depends(s3_connection.get_s3_connection)):
-
+def assign_random_file(
+    project_id: int,
+    employee_id: str,
+    db: Session = Depends(get_db),
+    s3=Depends(s3_connection.get_s3_connection)
+):
     # Step 1: Validate project
     project = db.query(database_models.Project).filter(database_models.Project.id == project_id).first()
     if not project:
@@ -48,7 +70,6 @@ def assign_random_file(project_id: int, employee_id: str, db: Session = Depends(
         raise HTTPException(status_code=404, detail="User not found")
 
     # Step 3: Ensure user is part of the project
-    print(f"Checking membership for project {project_id} and user {employee_id}")
     project_member = (
         db.query(database_models.ProjectMember)
         .filter(
@@ -57,65 +78,58 @@ def assign_random_file(project_id: int, employee_id: str, db: Session = Depends(
         )
         .first()
     )
-    print("Found project_member:", project_member)
-
     if not project_member:
         raise HTTPException(status_code=400, detail="User is not part of this project")
 
-    
-    # project_prefix = f"{project.name}/working/raw/"
-    # print("the selected project is", project_prefix)
-
-    # response = s3.list_objects_v2(Bucket=BUCKET_NAME, Prefix=project_prefix)
-    # contents = response.get("Contents")
-    # if not contents:
-    #     raise HTTPException(status_code=404, detail="No files available in raw folder")
-
-
     # Step 4: List available raw files in S3
     project_prefix = f"annotation/{project.name}/working_directory/raw/"
-    print("the selected project is", project_prefix)
-
     response = s3.list_objects_v2(Bucket=BUCKET_NAME, Prefix=project_prefix)
     contents = response.get("Contents")
+
     if not contents:
         raise HTTPException(status_code=404, detail="No files available in raw folder")
 
     # Step 5: Pick a random file
     selected_file = random.choice(contents)
     print("selected_file is",selected_file)
-    file_key = selected_file["Key"] #actualy the path to the file from annotation
+    file_key = selected_file["Key"]
     print("file_key is ",file_key)
-    filename = os.path.basename(file_key) #actual file name in s3
+    filename = os.path.basename(file_key)#actual file name in s3
     print("filename is",filename)
     assigned_key = f"annotation/{project.name}/working_directory/assigned/{filename}"
     print("assigned_key is",assigned_key) # same as file_key without annotation/ in the path
 
-    # Step 6: Move file in S3
+    
+
+
+
+    
+
+    # Step 6: Move file in S3 (copy + delete)
     try:
         s3.copy_object(
             Bucket=BUCKET_NAME,
             CopySource={"Bucket": BUCKET_NAME, "Key": file_key},
             Key=assigned_key
         )
-        print("\n   file copy done!!")
         s3.delete_object(Bucket=BUCKET_NAME, Key=file_key)
-        print("\n    file delete done !!!!")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to move file in S3: {str(e)}")
 
-    # Step 7: Update the existing file record (not create new)
-    print("the file's key is",file_key)
+    # Step 7: Update the existing file record
     file_record = (
         db.query(database_models.Files)
-        .filter(database_models.Files.s3_key == filename)
+        .filter(
+            database_models.Files.project_id == project_id,
+            database_models.Files.s3_key == filename
+        )
         .first()
     )
-    
+
     if not file_record:
         raise HTTPException(status_code=404, detail="File record not found in database")
 
-    #file_record.s3_key = assigned_key
+    file_record.s3_key = assigned_key
     file_record.status = "assigned"
     db.commit()
     db.refresh(file_record)
@@ -123,22 +137,30 @@ def assign_random_file(project_id: int, employee_id: str, db: Session = Depends(
     # Step 8: Create new annotation record
     new_annotation = database_models.Annotations(
         file_id=file_record.id,
-        project_member_id=project_member.id,
+        user_id=user.id,
         assigned_by="random"
     )
     db.add(new_annotation)
     db.commit()
+    db.refresh(new_annotation)
 
+    # Step 9: Return success response
     file_url = f"https://{BUCKET_NAME}.s3.eu-north-1.amazonaws.com/{assigned_key}"
 
     return {
         "message": "File assigned successfully",
         "employee_id": employee_id,
         "file_assigned": assigned_key,
-        "file_url": file_url
+        "file_url": file_url,
+        "file_id": file_record.id,
+        "annotation_id": new_annotation.id
     }
 
-# endpoint to get all files assigned for a user
+
+
+
+
+
 @router.get("/user/{user_id}/assigned-files")
 def get_user_assigned_files(
     user_id: str,
@@ -151,59 +173,50 @@ def get_user_assigned_files(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        # Step 2: Get project members for this user
-        project_members = db.query(database_models.ProjectMember).filter(
-            database_models.ProjectMember.user_id == user_id
-        ).all()
-        if not project_members:
-            raise HTTPException(status_code=404, detail="User has no project assignments")
+        # Step 2: Get all annotations created for this user
+        annotations = (
+            db.query(database_models.Annotations)
+            .filter(database_models.Annotations.user_id == user_id)
+            .all()
+        )
+
+        if not annotations:
+            raise HTTPException(status_code=404, detail="No assigned files found for this user")
 
         result = []
 
-        # Step 3: Iterate through project members and their annotations
-        for pm in project_members:
-            annotations = db.query(database_models.Annotations).filter(
-                database_models.Annotations.project_member_id == pm.id
-            ).all()
+        # Step 3: Iterate through annotations and fetch related file & project info
+        for annotation in annotations:
+            file = annotation.file
+            if not file:
+                continue
 
-            for annotation in annotations:
-                file = annotation.file
-                if not file:
-                    continue
+            project = file.project
+            if not project:
+                continue
 
-                project = file.project
-                if not project:
-                    continue
+            s3_key = file.s3_key  # already stores the full S3 path
 
-                # 🧠 Ensure full S3 path before generating URL
-                s3_key = file.s3_key
-                if not s3_key.startswith("annotation/"):
-                    s3_key = f"annotation/{project.name}/working_directory/assigned/{file.s3_key}"
+            # Generate presigned S3 URL safely
+            try:
+                file_url = admin_helper.get_presigned_url(s3, s3_key)
+            except Exception as e:
+                print(f"Error generating presigned URL for {s3_key}: {e}")
+                continue
 
-                print(f"📂 Generating URL for key: {s3_key}")
+            filename = os.path.basename(s3_key)
 
-                # Generate presigned S3 URL safely
-                try:
-                    file_url = admin_helper.get_presigned_url(s3, s3_key)
-                except Exception as e:
-                    print(f"Error generating presigned URL for {s3_key}: {e}")
-                    continue
-
-                if not file_url:
-                    continue
-
-                filename = os.path.basename(s3_key)
-
-                # ✅ Include assigned_by field
-                result.append({
-                    "file_id": file.id,
-                    "filename": filename,
-                    "project_id": project.id,
-                    "project_name": project.name,
-                    "assigned_by": annotation.assigned_by,
-                    "assigned_at": annotation.assigned_at,
-                    "object_url": file_url
-                })
+            # ✅ Include assigned_by and assigned_at fields
+            result.append({
+                "file_id": file.id,
+                "filename": filename,
+                "project_id": project.id,
+                "project_name": project.name,
+                "assigned_by": annotation.assigned_by,
+                "assigned_at": annotation.assigned_at,
+                "status": file.status,
+                "object_url": file_url
+            })
 
         if not result:
             raise HTTPException(status_code=404, detail="No assigned files found for this user")
@@ -215,9 +228,3 @@ def get_user_assigned_files(
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
-
-
-
-
-
-
