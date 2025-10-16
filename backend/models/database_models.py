@@ -19,22 +19,7 @@ class Users(Base):
     otpExpiry = Column(DateTime, nullable=True)
 
     project_links = relationship("ProjectMember", back_populates="user")
-    annotations = relationship("Annotations", back_populates="user") 
-
-
-class ProjectMember(Base):
-    __tablename__ = "project_members"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    project_role = Column(String, nullable=False)  # "annotator" or "reviewer"
-    joined_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-    project = relationship("Project", back_populates="members")
-    user = relationship("Users", back_populates="project_links")
-   
-
+    annotations = relationship("Annotations", back_populates="user")
 
 
 class Project(Base):
@@ -48,11 +33,30 @@ class Project(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(),
                         onupdate=func.now(), nullable=False)
 
-    members = relationship("ProjectMember", back_populates="project")
-    files = relationship("Files", back_populates="project")  # link to project files
+    # Cascading deletes: deleting project deletes members and files
+    members = relationship(
+        "ProjectMember",
+        back_populates="project",
+        cascade="all, delete-orphan"
+    )
+    files = relationship(
+        "Files",
+        back_populates="project",
+        cascade="all, delete-orphan"
+    )
 
 
+class ProjectMember(Base):
+    __tablename__ = "project_members"
 
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_role = Column(String, nullable=False)  # "annotator" or "reviewer"
+    joined_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    project = relationship("Project", back_populates="members")
+    user = relationship("Users", back_populates="project_links")
 
 
 class Files(Base):
@@ -62,15 +66,17 @@ class Files(Base):
     project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     s3_key = Column(String(255), unique=True, nullable=False, index=True)  # unique S3 key
     type = Column(Enum('image', 'video', name="file_type"), nullable=False)
-    status = Column(Enum('pending', 'assigned','review', 'completed', name="file_status"), nullable=False, default='pending')
+    status = Column(Enum('pending', 'assigned', 'review', 'completed', name="file_status"), nullable=False, default='pending')
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     project = relationship("Project", back_populates="files")
-    annotations = relationship("Annotations", back_populates="file")
-
-
-
+    # Cascading deletes: deleting a file deletes all its annotations
+    annotations = relationship(
+        "Annotations",
+        back_populates="file",
+        cascade="all, delete-orphan"
+    )
 
 
 class Annotations(Base):
@@ -88,11 +94,6 @@ class Annotations(Base):
 
     file = relationship("Files", back_populates="annotations")
     user = relationship("Users", back_populates="annotations")
-
-
-
-
-
 
 
 
