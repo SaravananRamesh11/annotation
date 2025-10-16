@@ -19,7 +19,7 @@ class Users(Base):
     otpExpiry = Column(DateTime, nullable=True)
 
     project_links = relationship("ProjectMember", back_populates="user")
-    # Removed annotations relationship here
+    annotations = relationship("Annotations", back_populates="user") 
 
 
 class ProjectMember(Base):
@@ -33,7 +33,7 @@ class ProjectMember(Base):
 
     project = relationship("Project", back_populates="members")
     user = relationship("Users", back_populates="project_links")
-    annotations = relationship("Annotations", back_populates="project_member")  # correct FK
+   
 
 
 
@@ -70,21 +70,25 @@ class Files(Base):
     annotations = relationship("Annotations", back_populates="file")
 
 
+
+
+
 class Annotations(Base):
     __tablename__ = "annotations"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
-    project_member_id = Column(Integer, ForeignKey("project_members.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     data = Column(JSON, nullable=True)
-    assigned_by = Column(Enum('admin', 'random', name="assign1ed_type"), nullable=False)
+    assigned_by = Column(Enum('admin', 'random', name="assigned_type"), nullable=False)
     assigned_at = Column(DateTime(timezone=True), server_default=func.now())
     started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_saved_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     submitted_at = Column(DateTime(timezone=True), nullable=True)
 
     file = relationship("Files", back_populates="annotations")
-    project_member = relationship("ProjectMember", back_populates="annotations")
+    user = relationship("Users", back_populates="annotations")
+
 
 
 
