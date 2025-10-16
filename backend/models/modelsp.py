@@ -83,3 +83,8 @@ class AnnotationRequest(BaseModel):
 
 class ProjectRequest(BaseModel):
     project_id: int
+
+
+
+class ProjectRequest(BaseModel):
+    project_id: int
