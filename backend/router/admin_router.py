@@ -1,3 +1,4 @@
+import traceback
 from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form,Query
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import func, select, update
@@ -347,7 +348,12 @@ def get_project_files(
         "finished_directory": finished_urls
     }
 
-@router.post("/annotation_table")
+@router.post("/annotation_table")  
+#for using this in the frontend, first show all the files in a particular project.
+#side button allows the admin to assign the file to only one person at a time directs the admin to next page
+#in the next page it shows all the annotators and reviewers in the project
+#they can select one person and assign the file to that person
+
 def annotation(
     # file_id: int,
     # project_member_id: int,
@@ -505,8 +511,3 @@ def promote_multiple_annotators_to_editors(project_id: int, request: modelsp.Pro
         print("❌ ERROR:", e)
         raise HTTPException(status_code=500, detail=str(e))
     
-
-
-
-
-
