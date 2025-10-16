@@ -79,17 +79,13 @@ class Files(Base):
     )
 
 class Annotations(Base):
-    _tablename_ = "annotations"
+    __tablename__ = "annotations"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     data = Column(JSON, nullable=True)
-<<<<<<< HEAD
-    assigned_by = Column(Enum('admin', 'random', name="assign1ed_type"), nullable=False)
-=======
     assigned_by = Column(Enum('admin', 'random', name="assigned_type"), nullable=False)
->>>>>>> a046b7e688b134b16a6776e996785caa55433a5d
     assigned_at = Column(DateTime(timezone=True), server_default=func.now())
     started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_saved_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

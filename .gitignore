@@ -30,3 +30,4 @@ __pycache__/
 .env.local
 cp.py
 notes.txt
+*.pyc
