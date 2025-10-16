@@ -1,7 +1,9 @@
 import os
 import random
+import traceback
 from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form,Query
 from sqlalchemy.orm import Session
+from helper_functions import admin_helper
 from models import modelsp,database_models
 from database import get_db
 from utils import s3_connection
@@ -135,5 +137,87 @@ def assign_random_file(project_id: int, employee_id: str, db: Session = Depends(
         "file_assigned": assigned_key,
         "file_url": file_url
     }
+
+# endpoint to get all files assigned for a user
+@router.get("/user/{user_id}/assigned-files")
+def get_user_assigned_files(
+    user_id: str,
+    db: Session = Depends(get_db),
+    s3=Depends(s3_connection.get_s3_connection)
+):
+    try:
+        # Step 1: Validate user
+        user = db.query(database_models.Users).filter(database_models.Users.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Step 2: Get project members for this user
+        project_members = db.query(database_models.ProjectMember).filter(
+            database_models.ProjectMember.user_id == user_id
+        ).all()
+        if not project_members:
+            raise HTTPException(status_code=404, detail="User has no project assignments")
+
+        result = []
+
+        # Step 3: Iterate through project members and their annotations
+        for pm in project_members:
+            annotations = db.query(database_models.Annotations).filter(
+                database_models.Annotations.project_member_id == pm.id
+            ).all()
+
+            for annotation in annotations:
+                file = annotation.file
+                if not file:
+                    continue
+
+                project = file.project
+                if not project:
+                    continue
+
+                # 🧠 Ensure full S3 path before generating URL
+                s3_key = file.s3_key
+                if not s3_key.startswith("annotation/"):
+                    s3_key = f"annotation/{project.name}/working_directory/assigned/{file.s3_key}"
+
+                print(f"📂 Generating URL for key: {s3_key}")
+
+                # Generate presigned S3 URL safely
+                try:
+                    file_url = admin_helper.get_presigned_url(s3, s3_key)
+                except Exception as e:
+                    print(f"Error generating presigned URL for {s3_key}: {e}")
+                    continue
+
+                if not file_url:
+                    continue
+
+                filename = os.path.basename(s3_key)
+
+                # ✅ Include assigned_by field
+                result.append({
+                    "file_id": file.id,
+                    "filename": filename,
+                    "project_id": project.id,
+                    "project_name": project.name,
+                    "assigned_by": annotation.assigned_by,
+                    "assigned_at": annotation.assigned_at,
+                    "object_url": file_url
+                })
+
+        if not result:
+            raise HTTPException(status_code=404, detail="No assigned files found for this user")
+
+        return result
+
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+
+
+
+
 
 
