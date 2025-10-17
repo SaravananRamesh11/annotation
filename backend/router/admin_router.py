@@ -297,6 +297,82 @@ async def add_project_members(data: modelsp.AddProjectMembers, db: Session = Dep
     return {"message": "Project members added successfully"}
 
 
+# delete_project endpoint
+@router.delete("/delete_project/{project_id}")
+async def delete_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    s3_client=Depends(s3_connection.get_s3_connection)
+):
+    """
+    Delete a project and all its associated data:
+    1. Delete project from database (cascade deletes members, files, annotations)
+    2. Delete project folder from S3
+    """
+    try:
+        # 1. Get project details before deletion
+        project = db.query(database_models.Project).filter(database_models.Project.id == project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        project_name = project.name
+        print(f"🗑️ Deleting project: {project_name} (ID: {project_id})")
+        
+        # 2. Delete project from database (cascade will handle related records)
+        db.delete(project)
+        db.commit()
+        print(f"✅ Project {project_name} deleted from database")
+        
+        # 3. Delete project folder from S3
+        BASE_PATH = "annotation/"
+        project_prefix = f"{BASE_PATH}{project_name}/"
+        
+        try:
+            # List all objects with the project prefix
+            paginator = s3_client.get_paginator('list_objects_v2')
+            pages = paginator.paginate(Bucket=BUCKET_NAME, Prefix=project_prefix)
+            
+            objects_to_delete = []
+            for page in pages:
+                if 'Contents' in page:
+                    for obj in page['Contents']:
+                        objects_to_delete.append({'Key': obj['Key']})
+            
+            # Delete all objects in the project folder
+            if objects_to_delete:
+                s3_client.delete_objects(
+                    Bucket=BUCKET_NAME,
+                    Delete={
+                        'Objects': objects_to_delete,
+                        'Quiet': False
+                    }
+                )
+                print(f"✅ Deleted {len(objects_to_delete)} objects from S3 folder: {project_prefix}")
+            else:
+                print(f"ℹ️ No objects found in S3 folder: {project_prefix}")
+                
+        except ClientError as e:
+            print(f"⚠️ Error deleting S3 folder {project_prefix}: {e}")
+            # Don't raise exception here as database deletion was successful
+            # Just log the S3 error
+        
+        return {
+            "message": f"Project '{project_name}' deleted successfully",
+            "project_id": project_id,
+            "project_name": project_name
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error deleting project: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail=f"Failed to delete project: {str(e)}"
+        )
+
+
 # get_all_users endpoint
 @router.get("/get_all_user", response_model=List[modelsp.UserResponse])
 async def get_all_user(db: Session = Depends(get_db)):
