@@ -78,7 +78,6 @@ class Files(Base):
         cascade="all, delete-orphan"
     )
 
-
 class Annotations(Base):
     __tablename__ = "annotations"
 
@@ -94,7 +93,6 @@ class Annotations(Base):
 
     file = relationship("Files", back_populates="annotations")
     user = relationship("Users", back_populates="annotations")
-
 
 
 
