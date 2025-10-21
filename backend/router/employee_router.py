@@ -3,7 +3,7 @@ import os
 import random
 import traceback
 from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form,Query
-#from pytz import timezone
+from botocore.exceptions import NoCredentialsError,ClientError
 from sqlalchemy.orm import Session
 from helper_functions import admin_helper
 from models import modelsp,database_models
@@ -131,7 +131,7 @@ def assign_random_file(
     if not file_record:
         raise HTTPException(status_code=404, detail="File record not found in database")
 
-    file_record.s3_key = assigned_key
+    file_record.s3_key = filename
     file_record.status = "assigned"
     db.commit()
     db.refresh(file_record)
@@ -166,8 +166,7 @@ def assign_random_file(
 @router.get("/user/{user_id}/assigned-files")
 def get_user_assigned_files(
     user_id: str,
-    db: Session = Depends(get_db),
-    s3=Depends(s3_connection.get_s3_connection)
+    db: Session = Depends(get_db)
 ):
     try:
         # Step 1: Validate user
@@ -187,6 +186,10 @@ def get_user_assigned_files(
 
         result = []
 
+        # AWS info (needed to build public URL)
+        S3_BUCKET = BUCKET_NAME
+        
+
         # Step 3: Iterate through annotations and fetch related file & project info
         for annotation in annotations:
             file = annotation.file
@@ -197,16 +200,14 @@ def get_user_assigned_files(
             if not project:
                 continue
 
-            s3_key = file.s3_key  # already stores the full S3 path
+            # Extract just the hex filename (remove any folder prefixes)
+            filename = os.path.basename(file.s3_key)
 
-            # Generate presigned S3 URL safely
-            try:
-                file_url = admin_helper.get_presigned_url(s3, s3_key)
-            except Exception as e:
-                print(f"Error generating presigned URL for {s3_key}: {e}")
-                continue
-
-            filename = os.path.basename(s3_key)
+            # Construct the actual object URL manually
+            object_url = (
+                f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/"
+                f"annotation/{project.name}/working_directory/{file.status}/{filename}"
+            )
 
             # ✅ Include assigned_by and assigned_at fields
             result.append({
@@ -217,7 +218,7 @@ def get_user_assigned_files(
                 "assigned_by": annotation.assigned_by,
                 "assigned_at": annotation.assigned_at,
                 "status": file.status,
-                "object_url": file_url
+                "object_url": object_url
             })
 
         if not result:
@@ -228,8 +229,10 @@ def get_user_assigned_files(
     except HTTPException as he:
         raise he
     except Exception as e:
+        import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+
     
 # Endpoint to save annotation data for a file
 @router.put("/save_annotation/{file_id}")
@@ -293,3 +296,61 @@ def get_file_data(file_id: int, db: Session = Depends(get_db)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+
+@router.patch("/move_to_review/{file_id}")
+def move_file_to_review(file_id: int, db: Session = Depends(get_db),s3=Depends(s3_connection.get_s3_connection)):
+    # 1️⃣ Fetch the file
+    file = db.query(database_models.Files).filter(database_models.Files.id == file_id).first()
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # 2️⃣ Ensure file is in assigned state
+    if file.status != "assigned":
+        raise HTTPException(status_code=400, detail="File is not in 'assigned' state")
+
+    # 3️⃣ Get associated project
+    project = db.query(database_models.Project).filter(database_models.Project.id == file.project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found for this file")
+
+    project_name = project.name
+    #print(project_name,file.s3_key)
+
+    
+
+    # 4️⃣ Construct old and new S3 paths
+    old_key = f"annotation/{project_name}/working_directory/assigned/{file.s3_key}"
+    new_key = f"annotation/{project_name}/working_directory/review/{file.s3_key}"
+
+    #print(old_key,"\n",new_key)
+    try:
+        # Copy file to new location
+        s3.copy_object(
+            Bucket=BUCKET_NAME,
+            CopySource={"Bucket": BUCKET_NAME, "Key": old_key},
+            Key=new_key)
+
+
+        # Delete the old file
+        s3.delete_object(Bucket=BUCKET_NAME, Key=old_key)
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=f"S3 operation failed: {str(e)}")
+
+    # 5️⃣ Update database record
+    file.status = "review"
+    db.commit()
+
+    return {
+        "message": f"File moved to review for project '{project_name}' successfully",
+        "file_id": file.id,
+        "project_name": project_name,
+        "old_s3_key": old_key,
+        "new_s3_key": new_key,
+        "new_status": file.status
+    }
+
+    
+
+
