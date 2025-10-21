@@ -267,3 +267,29 @@ async def save_annotation(
         db.rollback()
         print("Error saving annotation:", e)
         raise HTTPException(status_code=500, detail=f"Error saving annotation data: {str(e)}")
+
+# Endpoint to get the saved annotation data for a file   
+@router.get("/file/{file_id}/data")
+def get_file_data(file_id: int, db: Session = Depends(get_db)):
+    """
+    Fetch the 'data' and 'last_saved_at' fields for a given file_id.
+    """
+    try:
+        # Fetch the record by file_id
+        record = (
+            db.query(database_models.Annotations)
+            .filter(database_models.Annotations.file_id == file_id)
+            .first()
+        )
+
+        if not record:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        return {
+            "file_id": file_id,
+            "data": record.data,
+            "last_saved_at": record.last_saved_at
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
