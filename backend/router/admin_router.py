@@ -1,7 +1,6 @@
 import traceback
 from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form,Query
-from pydantic import BaseModel, EmailStr
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, update,delete
 from sqlalchemy.orm import Session,aliased
 from database import get_db
 from sqlalchemy.dialects.postgresql import JSONB
@@ -9,7 +8,6 @@ from dotenv import load_dotenv
 import  uuid,os,io
 from utils import s3_connection
 from botocore.exceptions import NoCredentialsError,ClientError
-from typing import List
 from models import modelsp,database_models
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
@@ -643,4 +641,19 @@ def get_project_members(request: modelsp.ProjectRequest, db: Session = Depends(g
     except Exception as e:
         print("❌ ERROR:", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.delete("/remove_members")
+def remove_members(request: modelsp.DeleteMembersRequest, db: Session = Depends(get_db)):
+    if not request.user_ids:
+        return {"message": "No user IDs provided."}
+
+    result = db.execute(
+        delete(database_models.ProjectMember)
+        .where(database_models.ProjectMember.project_id == request.project_id)
+        .where(database_models.ProjectMember.user_id.in_(request.user_ids))
+    )
+    db.commit()
+    return {"message": f"{result.rowcount} members deleted successfully."}
 
