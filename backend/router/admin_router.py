@@ -296,7 +296,7 @@ async def add_project_members(data: modelsp.AddProjectMembers, db: Session = Dep
 
 
 # delete_project endpoint
-@router.delete("/delete_project/{project_id}")
+@router.delete( "/delete_project/{project_id}")
 async def delete_project(
     project_id: int,
     db: Session = Depends(get_db),
