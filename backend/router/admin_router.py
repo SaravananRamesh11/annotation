@@ -436,8 +436,8 @@ def get_users_not_in_project(project_id: int, db: Session = Depends(get_db)):
             "id": user.id,
             "name": user.name,
             "email": user.email,
-            "role": user.role
-        }
+            "role": user.role   
+         }
         for user in users
     ]
 
