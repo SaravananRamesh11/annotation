@@ -87,7 +87,14 @@ class AnnotationRequest(BaseModel):
 class ProjectRequest(BaseModel):
     project_id: int
 
+class BoundingBox(BaseModel):
+    id: str
+    x: float
+    y: float
+    width: float
+    height: float
+    rotation: float
+    classes: List[Dict[str, Any]] 
 
-
-class ProjectRequest(BaseModel):
-    project_id: int
+class SaveAnnotationData(BaseModel):
+    data: List[BoundingBox]
