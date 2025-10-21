@@ -23,7 +23,10 @@ class ProjectCreate(BaseModel): #http://localhost:8000/api/admin/create_project 
     
 
 
-
+class DeleteMembersRequest(BaseModel):
+    project_id: int
+    user_ids: List[str]
+   
 
   
 
@@ -89,5 +92,3 @@ class ProjectRequest(BaseModel):
 
 
 
-class ProjectRequest(BaseModel):
-    project_id: int
