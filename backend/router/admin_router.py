@@ -1,6 +1,6 @@
 import traceback
 from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form,Query
-from sqlalchemy import func, select, update,delete
+from sqlalchemy import func, select, update,delete,exists,not_
 from sqlalchemy.orm import Session,aliased
 from database import get_db
 from sqlalchemy.dialects.postgresql import JSONB
@@ -15,6 +15,9 @@ import bcrypt
 from fastapi.responses import JSONResponse
 import pandas as pd
 from helper_functions import admin_helper
+
+
+
 
 
 
@@ -497,7 +500,6 @@ def annotation(
             assigned_at=datetime.now(timezone.utc),
             data=None,
             assigned_by='admin',
-            started_at=datetime.now(timezone.utc),
             last_saved_at=datetime.now(timezone.utc),
             submitted_at=None
         )
@@ -670,3 +672,63 @@ def remove_members(request: modelsp.DeleteMembersRequest, db: Session = Depends(
     db.commit()
     return {"message": f"{result.rowcount} members deleted successfully."}
 
+
+
+##################################reviewer##############################################################
+
+
+@router.get("/project/{project_id}/unassigned-reviews")
+def get_review_files_without_review_record(
+    project_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Returns all Files in 'review' status for a given project_id that do not
+    have any corresponding review records in the AnnotationReviews table.
+    """
+    # ✅ Check if the project exists
+    project_exists = db.query(database_models.Project.id).filter(
+        database_models.Project.id == project_id
+    ).first()
+
+    if not project_exists:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Define alias for AnnotationReviews
+    ReviewAlias = aliased(database_models.AnnotationReviews)
+
+    # Base query: all files in 'review' status for this project
+    query = db.query(database_models.Files).filter(
+        database_models.Files.project_id == project_id,
+        database_models.Files.status == 'review'
+    )
+
+    # Subquery: files that already have an annotation review record
+    files_with_review_subquery = (
+        db.query(database_models.Annotations.file_id)
+        .join(ReviewAlias, database_models.Annotations.id == ReviewAlias.annotation_id)
+        .distinct()
+        .subquery()
+    )
+
+    # Filter out files that already have reviews
+    query = query.filter(
+        not_(database_models.Files.id.in_(files_with_review_subquery))
+    )
+
+    results = query.all()
+
+    # Return the response
+    return {
+        "project_id": project_id,
+        "unassigned_review_files": [
+            {
+                "file_id": file.id,
+                "s3_key": file.s3_key,
+                "status": file.status,
+                "created_at": file.created_at,
+                "updated_at": file.updated_at,
+            }
+            for file in results
+        ],
+    }

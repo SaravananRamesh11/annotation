@@ -5,7 +5,7 @@ import models.database_models
 from models import modelsp
 import bcrypt
 from fastapi.responses import JSONResponse
-from router import router_login,admin_router,employee_router
+from router import router_login,admin_router,annotator_router
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -80,4 +80,4 @@ init_db()
 
 app.include_router(router_login.router)
 app.include_router(admin_router.router)
-app.include_router(employee_router.router)
+app.include_router(annotator_router.router)
