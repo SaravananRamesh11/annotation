@@ -20,6 +20,19 @@ class Users(Base):
 
     project_links = relationship("ProjectMember", back_populates="user")
     annotations = relationship("Annotations", back_populates="user")
+    reviews = relationship("AnnotationReviews", back_populates="reviewer")
+
+class ProjectMember(Base):
+    __tablename__ = "project_members"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_role = Column(String, nullable=False)  # "annotator" or "reviewer"
+    joined_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    project = relationship("Project", back_populates="members")
+    user = relationship("Users", back_populates="project_links")
 
 
 class Project(Base):
@@ -45,20 +58,6 @@ class Project(Base):
         cascade="all, delete-orphan"
     )
 
-
-class ProjectMember(Base):
-    __tablename__ = "project_members"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    project_role = Column(String, nullable=False)  # "annotator" or "reviewer"
-    joined_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-
-    project = relationship("Project", back_populates="members")
-    user = relationship("Users", back_populates="project_links")
-
-
 class Files(Base):
     __tablename__ = "files"
 
@@ -78,21 +77,78 @@ class Files(Base):
         cascade="all, delete-orphan"
     )
 
+
+class AnnotationReviews(Base):
+    __tablename__ = "annotation_reviews"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # Link to the annotation being reviewed
+    annotation_id = Column(Integer, ForeignKey("annotations.id", ondelete="CASCADE"), nullable=False)
+
+    # Who reviewed this annotation
+    reviewer_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    # Review decision
+    decision = Column(
+        Enum('approved', 'rejected', name="review_decision"),
+        nullable=False
+    )
+
+    # Optional feedback/comments
+    comments = Column(String(255), nullable=True)
+
+    # Timestamps
+    reviewed_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationship
+    annotation = relationship("Annotations", back_populates="reviews")
+    reviewer = relationship("Users", back_populates="reviews")
+
 class Annotations(Base):
     __tablename__ = "annotations"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    # Main data payload (bounding boxes, attributes, etc.)
     data = Column(JSON, nullable=True)
+
+    # Assignment info
     assigned_by = Column(Enum('admin', 'random', name="assigned_type"), nullable=False)
     assigned_at = Column(DateTime(timezone=True), server_default=func.now())
-    started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Annotation progress states
+    status = Column(
+        Enum('assigned', 'pending', 'review', 'completed', name="annotation_status"),
+        default='assigned',
+        nullable=False
+    )
+
     last_saved_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     submitted_at = Column(DateTime(timezone=True), nullable=True)
 
+    # Review-related tracking
+    review_state = Column(
+        Enum('not_reviewed', 'in_review', 'approved', 'rejected', name="review_state"),
+        default='not_reviewed',
+        nullable=False
+    )
+    review_cycle = Column(Integer, default=1, nullable=False)  # how many times re-submitted
+
+    # Relationships
     file = relationship("Files", back_populates="annotations")
     user = relationship("Users", back_populates="annotations")
+    reviews = relationship(
+        "AnnotationReviews",
+        back_populates="annotation",
+        cascade="all, delete-orphan"
+    )
+
+
+
+
 
 
 

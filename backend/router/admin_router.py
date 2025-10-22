@@ -384,13 +384,13 @@ async def get_all_user(db: Session = Depends(get_db)):
 def get_project_files(
     project_id: int,
     db: Session = Depends(get_db),
-    s3_client=Depends(s3_connection.get_s3_connection)  # ⬅ Inject S3 client from your utils module
+    s3_client=Depends(s3_connection.get_s3_connection)
 ):
     """
     Given a project ID:
     1️⃣ Fetch project name from DB
-    2️⃣ List files from S3 working and finished directories
-    3️⃣ Return signed URLs for both
+    2️⃣ List files from S3 working and finished directories with subfolders
+    3️⃣ Return signed URLs for all subfolders
     """
 
     BASE_PATH = "annotation/"
@@ -403,23 +403,36 @@ def get_project_files(
     project_name = project.name
     print(f"📁 Fetching files for project: {project_name}")
 
-    # 2️⃣ Build S3 prefixes
-    working_prefix = f"{BASE_PATH}{project_name}/working_directory/"
-    finished_prefix = f"{BASE_PATH}{project_name}/finished_directory/"
+    # 2️⃣ Define subfolder prefixes
+    working_prefixes = {
+        "raw": f"{BASE_PATH}{project_name}/working_directory/raw/",
+        "review": f"{BASE_PATH}{project_name}/working_directory/review/",
+        "assigned": f"{BASE_PATH}{project_name}/working_directory/assigned/"
+    }
 
-    # 3️⃣ List files from both directories
-    working_files = admin_helper.list_files_in_s3(s3_client, working_prefix)
-    finished_files = admin_helper.list_files_in_s3(s3_client, finished_prefix)
+    finished_prefixes = {
+        "completed": f"{BASE_PATH}{project_name}/finished_directory/completed/"
+    }
 
-    # 4️⃣ Generate signed URLs
-    working_urls = [admin_helper.get_presigned_url(s3_client, key) for key in working_files]
-    finished_urls = [admin_helper.get_presigned_url(s3_client, key) for key in finished_files]
+    # 3️⃣ List files and generate signed URLs for working subfolders
+    working_urls = {}
+    for folder_name, prefix in working_prefixes.items():
+        files = admin_helper.list_files_in_s3(s3_client, prefix)
+        working_urls[folder_name] = [admin_helper.get_presigned_url(s3_client, key) for key in files]
 
+    # 4️⃣ List files and generate signed URLs for finished subfolders
+    finished_urls = {}
+    for folder_name, prefix in finished_prefixes.items():
+        files = admin_helper.list_files_in_s3(s3_client, prefix)
+        finished_urls[folder_name] = [admin_helper.get_presigned_url(s3_client, key) for key in files]
+
+    # 5️⃣ Return structured response
     return {
         "project_name": project_name,
         "working_directory": working_urls,
         "finished_directory": finished_urls
     }
+
 
 @router.get("/{project_id}/available-users")
 def get_users_not_in_project(project_id: int, db: Session = Depends(get_db)):
