@@ -77,6 +77,35 @@ class Files(Base):
         cascade="all, delete-orphan"
     )
 
+class Annotations(Base):
+    __tablename__ = "annotations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+
+    data = Column(JSON, nullable=True)
+    assigned_by = Column(Enum('admin', 'random', name="assigned_type"), nullable=False)
+    assigned_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    last_saved_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
+
+    review_state = Column(
+        Enum('not_reviewed', 'in_review', 'approved', 'rejected', name="review_state"),
+        default='not_reviewed',
+        nullable=False
+    )
+    review_cycle = Column(Integer, default=1, nullable=False)
+
+    file = relationship("Files", back_populates="annotations")
+    user = relationship("Users", back_populates="annotations")
+    reviews = relationship(
+        "AnnotationReviews",
+        back_populates="annotation",
+        cascade="all, delete-orphan"
+    )
+
 
 class AnnotationReviews(Base):
     __tablename__ = "annotation_reviews"
@@ -92,7 +121,7 @@ class AnnotationReviews(Base):
     # Review decision
     decision = Column(
         Enum('approved', 'rejected', name="review_decision"),
-        nullable=False
+        nullable=True
     )
 
     # Optional feedback/comments
@@ -104,59 +133,5 @@ class AnnotationReviews(Base):
     # Relationship
     annotation = relationship("Annotations", back_populates="reviews")
     reviewer = relationship("Users", back_populates="reviews")
-
-class Annotations(Base):
-    __tablename__ = "annotations"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    file_id = Column(Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-
-    # Main data payload (bounding boxes, attributes, etc.)
-    data = Column(JSON, nullable=True)
-
-    # Assignment info
-    assigned_by = Column(Enum('admin', 'random', name="assigned_type"), nullable=False)
-    assigned_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    # Annotation progress states
-    status = Column(
-        Enum('assigned', 'pending', 'review', 'completed', name="annotation_status"),
-        default='assigned',
-        nullable=False
-    )
-
-    last_saved_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    submitted_at = Column(DateTime(timezone=True), nullable=True)
-
-    # Review-related tracking
-    review_state = Column(
-        Enum('not_reviewed', 'in_review', 'approved', 'rejected', name="review_state"),
-        default='not_reviewed',
-        nullable=False
-    )
-    review_cycle = Column(Integer, default=1, nullable=False)  # how many times re-submitted
-
-    # Relationships
-    file = relationship("Files", back_populates="annotations")
-    user = relationship("Users", back_populates="annotations")
-    reviews = relationship(
-        "AnnotationReviews",
-        back_populates="annotation",
-        cascade="all, delete-orphan"
-    )
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
