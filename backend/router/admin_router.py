@@ -1,6 +1,6 @@
 import traceback
 from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form,Query
-from sqlalchemy import func, select, update,delete,exists,not_
+from sqlalchemy import and_, func, select, update,delete,exists,not_
 from sqlalchemy.orm import Session,aliased
 from database import get_db
 from sqlalchemy.dialects.postgresql import JSONB
@@ -757,3 +757,76 @@ def get_unassigned_review_files(
         "unassigned_review_files": results
     }
 
+# Endpoint to get all editors of a project
+@router.get("/projects/{project_id}/editors")
+def get_project_editors(project_id: int, db: Session = Depends(get_db)):
+    """
+    Fetch all editors (user_id and name) for a given project.
+    """
+    try:
+        # Join project_members with users table
+        editors = (
+            db.query(
+                database_models.ProjectMember.user_id,
+                database_models.Users.name
+            )
+            .join(
+                database_models.Users,
+                database_models.Users.id == database_models.ProjectMember.user_id
+            )
+            .filter(
+                and_(
+                    database_models.ProjectMember.project_id == project_id,
+                    database_models.ProjectMember.project_role == "editor"
+                )
+            )
+            .all()
+        )
+
+        if not editors:
+            raise HTTPException(status_code=404, detail="No editors found for this project")
+
+        # Convert result to a simple JSON list
+        result = [{"user_id": e.user_id, "name": e.name} for e in editors]
+
+        return {"project_id": project_id, "editors": result}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Endpoint to assign a review file to a reviewer
+@router.post("/reviews/link")
+def link_annotation_review(data: modelsp.AssingnReviewFileRequest, db: Session = Depends(get_db)):
+    """
+    Create an entry in annotation_reviews by linking reviewer_id with annotation_id
+    found via file_id from the annotations table.
+    """
+    try:
+        # Step 1: Find the annotation_id for the given file_id
+        annotation = (
+            db.query(database_models.Annotations)
+            .filter(database_models.Annotations.file_id == data.file_id)
+            .first()
+        )
+
+        if not annotation:
+            raise HTTPException(status_code=404, detail="No annotation found for the given file_id")
+
+        # Step 2: Insert reviewer_id and annotation_id into annotation_reviews
+        new_review = database_models.AnnotationReviews(
+            annotation_id=annotation.id,
+            reviewer_id=data.reviewer_id
+        )
+
+        db.add(new_review)
+        db.commit()
+        db.refresh(new_review)
+
+        return {
+            "message": "Annotation review entry created successfully",
+            "annotation_id": annotation.id,
+            "reviewer_id": data.reviewer_id
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

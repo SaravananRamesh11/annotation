@@ -20,22 +20,16 @@ class ProjectCreate(BaseModel): #http://localhost:8000/api/admin/create_project 
     description: str | None = None
     classes: list[str] #List[Dict[str, Any]]
 
-    
-
 
 class DeleteMembersRequest(BaseModel):
     project_id: int
     user_ids: List[str]
    
 
-  
-
-
-
-
 class ProjectMemberData(BaseModel):
     user_id: str                   
     project_role: str              
+
 
 class AddProjectMembers(BaseModel):
     project_name: str
@@ -101,3 +95,8 @@ class BoundingBox(BaseModel):
 
 class SaveAnnotationData(BaseModel):
     data: List[BoundingBox]
+
+
+class AssingnReviewFileRequest(BaseModel):
+    reviewer_id: str
+    file_id: int
