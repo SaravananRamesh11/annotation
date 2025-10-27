@@ -458,101 +458,109 @@ def get_users_not_in_project(project_id: int, db: Session = Depends(get_db)):
     ]
 
 
+# Endpoint to assign multiple files to a annotator
 
-
+#for using this in the frontend, first show all the files in a particular project. 
+#side button allows the admin to assign the file to only one person at a time directs the admin to next page
+#in the next page it shows all the annotators and reviewers in the project # #they can select one person and assign the file to that person
 @router.post("/annotation_table")
-# #for using this in the frontend, first show all the files in a particular project.
-# #side button allows the admin to assign the file to only one person at a time directs the admin to next page
-# #in the next page it shows all the annotators and reviewers in the project
-# #they can select one person and assign the file to that person
-def annotation(
+def assign_multiple_annotations(
     request: modelsp.AnnotationRequest,
     db: Session = Depends(get_db),
     s3_client=Depends(s3_connection.get_s3_connection)
 ):
+    """
+    Assign multiple files to a single employee.
+    request.file_ids -> list of file IDs
+    request.user_id  -> employee (annotator) ID
+    """
     try:
-        # Step 1: Check if this file is already assigned
-        existing_annotation = db.execute(
-            select(database_models.Annotations).where(database_models.Annotations.file_id == request.file_id)
-        ).scalar_one_or_none()
+        assigned_annotations = []
 
-        if existing_annotation:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File ID {request.file_id} is already assigned to User ID {existing_annotation.user_id}"
+        # Loop through each file in the list
+        for file_id in request.file_ids:
+            # Step 1: Check if this file is already assigned
+            existing_annotation = db.execute(
+                select(database_models.Annotations).where(database_models.Annotations.file_id == file_id)
+            ).scalar_one_or_none()
+
+            if existing_annotation:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"File ID {file_id} is already assigned to User ID {existing_annotation.user_id}"
+                )
+
+            # Step 2: Fetch the file record from DB
+            file_record = db.query(database_models.Files).filter(database_models.Files.id == file_id).first()
+            if not file_record:
+                raise HTTPException(status_code=404, detail=f"File ID {file_id} not found")
+
+            # Step 2b: Fetch the project name from Project table using project_id
+            project = db.query(database_models.Project).filter(database_models.Project.id == file_record.project_id).first()
+            if not project:
+                raise HTTPException(status_code=404, detail=f"Project for File ID {file_id} not found")
+            project_name = project.name
+
+            # Step 3: Create new annotation entry
+            new_annotation = database_models.Annotations(
+                file_id=file_id,
+                user_id=request.user_id,
+                assigned_at=datetime.now(timezone.utc),
+                data=None,
+                assigned_by='admin',
+                last_saved_at=datetime.now(timezone.utc),
+                submitted_at=None
+            )
+            db.add(new_annotation)
+
+            # Step 4: Update file status to 'assigned'
+            db.execute(
+                update(database_models.Files)
+                .where(database_models.Files.id == file_id)
+                .values(status="assigned")
             )
 
-        # Step 2: Fetch the file record from DB
-        file_record = db.query(database_models.Files).filter(database_models.Files.id == request.file_id).first()
-        if not file_record:
-            raise HTTPException(status_code=404, detail=f"File ID {request.file_id} not found")
+            # --- Step 5: Move file in S3 from raw → assigned ---
+            filename = os.path.basename(file_record.s3_key)
+            raw_key = f"annotation/{project_name}/working_directory/raw/{filename}"
+            assigned_key = f"annotation/{project_name}/working_directory/assigned/{filename}"
 
-        # Step 2b: Fetch the project name from Project table using project_id
-        project = db.query(database_models.Project).filter(database_models.Project.id == file_record.project_id).first()
-        if not project:
-            raise HTTPException(status_code=404, detail=f"Project for File ID {request.file_id} not found")
-        project_name = project.name
+            try:
+                # Check if raw file exists
+                s3_client.head_object(Bucket=BUCKET_NAME, Key=raw_key)
 
-        # Step 3: Create new annotation entry
-        new_annotation = database_models.Annotations(
-            file_id=request.file_id,
-            user_id=request.user_id,
-            assigned_at=datetime.now(timezone.utc),
-            data=None,
-            assigned_by='admin',
-            last_saved_at=datetime.now(timezone.utc),
-            submitted_at=None
-        )
-        db.add(new_annotation)
+                # Copy to assigned folder
+                s3_client.copy_object(
+                    Bucket=BUCKET_NAME,
+                    CopySource={'Bucket': BUCKET_NAME, 'Key': raw_key},
+                    Key=assigned_key
+                )
 
-        # Step 4: Update file status to 'assigned'
-        db.execute(
-            update(database_models.Files)
-            .where(database_models.Files.id == request.file_id)
-            .values(status="assigned")
-        )
+                # Delete from raw folder
+                s3_client.delete_object(Bucket=BUCKET_NAME, Key=raw_key)
+                print(f"✅ Moved S3 file {raw_key} → {assigned_key}")
 
-        # --- Step 5: Move file in S3 from raw → assigned ---
-        filename = os.path.basename(file_record.s3_key)
-        raw_key = f"annotation/{project_name}/working_directory/raw/{filename}"
-        assigned_key = f"annotation/{project_name}/working_directory/assigned/{filename}"
+            except ClientError as e:
+                if e.response['Error']['Code'] == '404':
+                    raise HTTPException(status_code=404, detail=f"S3 file not found: {raw_key}")
+                else:
+                    raise HTTPException(status_code=500, detail=f"Failed to move file in S3: {str(e)}")
 
-        try:
-            # Check if raw file exists
-            s3_client.head_object(Bucket=BUCKET_NAME, Key=raw_key)
+            assigned_annotations.append(file_id)
 
-            # Copy to assigned folder
-            s3_client.copy_object(
-                Bucket=BUCKET_NAME,
-                CopySource={'Bucket': BUCKET_NAME, 'Key': raw_key},
-                Key=assigned_key
-            )
-
-            # Delete from raw folder
-            s3_client.delete_object(Bucket=BUCKET_NAME, Key=raw_key)
-            print(f"✅ Moved S3 file {raw_key} → {assigned_key}")
-
-        except ClientError as e:
-            if e.response['Error']['Code'] == '404':
-                raise HTTPException(status_code=404, detail=f"S3 file not found: {raw_key}")
-            else:
-                raise HTTPException(status_code=500, detail=f"Failed to move file in S3: {str(e)}")
-
-        # Step 6: Commit transaction
+        # Step 6: Commit transaction once after all assignments
         db.commit()
-        db.refresh(new_annotation)
 
         return {
-            "message": "Annotation created successfully",
-            "annotation_id": new_annotation.id,
-            "assigned_at": new_annotation.assigned_at
+            "message": "Annotations created successfully",
+            "total_assigned": len(assigned_annotations),
+            "file_ids": assigned_annotations,
+            "assigned_to": request.user_id
         }
 
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-    
-
 
 
 
@@ -740,40 +748,73 @@ def get_project_editors(project_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
+# Endpoint to assign multiple files to reviewer
+@router.post("/reviews/link/{reviewer_id}")
+def link_multiple_annotations_to_reviewer(
+    reviewer_id: str,
+    file_ids: List[int],
+    db: Session = Depends(get_db)
+):
+    """
+    Assign multiple files to a reviewer by linking each file's annotation
+    to the reviewer in the annotation_reviews table.
+    """
 
-# Endpoint to assign a review file to a reviewer
-@router.get("/reviews/link/{reviewer_id}/{file_id}")
-def link_annotation_review(reviewer_id:str,file_id:int, db: Session = Depends(get_db)):
-    """
-    Create an entry in annotation_reviews by linking reviewer_id with annotation_id
-    found via file_id from the annotations table.
-    """
     try:
-        # Step 1: Find the annotation_id for the given file_id
-        annotation = (
-            db.query(database_models.Annotations)
-            .filter(database_models.Annotations.file_id ==file_id)
-            .first()
-        )
+        if not file_ids:
+            raise HTTPException(status_code=400, detail="file_ids list cannot be empty")
 
-        if not annotation:
-            raise HTTPException(status_code=404, detail="No annotation found for the given file_id")
+        created_links = []
 
-        # Step 2: Insert reviewer_id and annotation_id into annotation_reviews
-        new_review = database_models.AnnotationReviews(
-            annotation_id=annotation.id,
-            reviewer_id=reviewer_id
-        )
+        for file_id in file_ids:
+            # Step 1️⃣: Find the annotation for each file_id
+            annotation = (
+                db.query(database_models.Annotations)
+                .filter(database_models.Annotations.file_id == file_id)
+                .first()
+            )
 
-        db.add(new_review)
+            if not annotation:
+                # Skip missing annotations, but continue for others
+                continue
+
+            # Step 2️⃣: Check if this reviewer is already linked to this annotation
+            existing_review = (
+                db.query(database_models.AnnotationReviews)
+                .filter(
+                    database_models.AnnotationReviews.annotation_id == annotation.id,
+                    database_models.AnnotationReviews.reviewer_id == reviewer_id
+                )
+                .first()
+            )
+
+            if existing_review:
+                # Avoid duplicate entries
+                continue
+
+            # Step 3️⃣: Create new review entry
+            new_review = database_models.AnnotationReviews(
+                annotation_id=annotation.id,
+                reviewer_id=reviewer_id
+            )
+
+            db.add(new_review)
+            created_links.append({
+                "annotation_id": annotation.id,
+                "file_id": file_id
+            })
+
+        # Step 4️⃣: Commit all changes
         db.commit()
-        db.refresh(new_review)
+
+        if not created_links:
+            raise HTTPException(status_code=400, detail="No new annotation links were created (may already exist or invalid file_ids)")
 
         return {
-            "message": "Annotation review entry created successfully",
-            "annotation_id": annotation.id,
-            "reviewer_id": reviewer_id
+            "message": f"Successfully linked {len(created_links)} annotation(s) to reviewer {reviewer_id}",
+            "created_links": created_links
         }
 
     except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
