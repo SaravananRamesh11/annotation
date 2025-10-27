@@ -556,14 +556,6 @@ def annotation(
 
 
 
-
-
-
-
-
-
-
-
 # end point to get annotators for a project, excluding those with multiple roles(editor)
 @router.get("/annotators/{project_id}", response_model=list[modelsp.AnnotatorOut])
 def get_annotators(project_id: int, db: Session = Depends(get_db)):
@@ -676,64 +668,6 @@ def remove_members(request: modelsp.DeleteMembersRequest, db: Session = Depends(
 
 ##################################reviewer##############################################################
 
-
-# @router.get("/project/{project_id}/unassigned-reviews")
-# def get_review_files_without_review_record(
-#     project_id: int,
-#     db: Session = Depends(get_db)
-# ):
-#     """
-#     Returns all Files in 'review' status for a given project_id that do not
-#     have any corresponding review records in the AnnotationReviews table.
-#     """
-#     # ✅ Check if the project exists
-#     project_exists = db.query(database_models.Project.id).filter(
-#         database_models.Project.id == project_id
-#     ).first()
-
-#     if not project_exists:
-#         raise HTTPException(status_code=404, detail="Project not found")
-
-#     # Define alias for AnnotationReviews
-#     ReviewAlias = aliased(database_models.AnnotationReviews)
-
-#     # Base query: all files in 'review' status for this project
-#     query = db.query(database_models.Files).filter(
-#         database_models.Files.project_id == project_id,
-#         database_models.Files.status == 'review'
-#     )
-
-#     # Subquery: files that already have an annotation review record
-#     files_with_review_subquery = (
-#         db.query(database_models.Annotations.file_id)
-#         .join(ReviewAlias, database_models.Annotations.id == ReviewAlias.annotation_id)
-#         .distinct()
-#         .subquery()
-#     )
-
-#     # Filter out files that already have reviews
-#     query = query.filter(
-#         not_(database_models.Files.id.in_(files_with_review_subquery))
-#     )
-
-#     results = query.all()
-
-#     # Return the response
-#     return {
-#         "project_id": project_id,
-#         "unassigned_review_files": [
-#             {
-#                 "file_id": file.id,
-#                 "s3_key": file.s3_key,
-#                 "status": file.status,
-#                 "created_at": file.created_at,
-#                 "updated_at": file.updated_at,
-#             }
-#             for file in results
-#         ],
-#     }
-
-
 @router.get("/project/{project_id}/unassigned-reviews")
 def get_unassigned_review_files(
     project_id: int,
@@ -757,46 +691,59 @@ def get_unassigned_review_files(
         "unassigned_review_files": results
     }
 
-# Endpoint to get all editors of a project
+
 @router.get("/projects/{project_id}/editors")
 def get_project_editors(project_id: int, db: Session = Depends(get_db)):
     """
     Fetch all editors (user_id and name) for a given project.
+    Uses subquery approach instead of join to ensure all reviewers are returned.
     """
     try:
-        # Join project_members with users table
-        editors = (
-            db.query(
-                database_models.ProjectMember.user_id,
-                database_models.Users.name
-            )
-            .join(
-                database_models.Users,
-                database_models.Users.id == database_models.ProjectMember.user_id
-            )
+        # Step 1: Get all user_ids with role "reviewer" for this project
+        reviewer_user_ids = (
+            db.query(database_models.ProjectMember.user_id)
             .filter(
                 and_(
                     database_models.ProjectMember.project_id == project_id,
-                    database_models.ProjectMember.project_role == "editor"
+                    database_models.ProjectMember.project_role == "reviewer"
                 )
             )
             .all()
         )
 
-        if not editors:
+        print("from sarva",reviewer_user_ids )
+
+        # Flatten list of tuples -> list of IDs
+        reviewer_user_ids = [r[0] for r in reviewer_user_ids]
+
+        if not reviewer_user_ids:
             raise HTTPException(status_code=404, detail="No editors found for this project")
 
-        # Convert result to a simple JSON list
+        # Step 2: Fetch user details for those IDs
+        editors = (
+            db.query(database_models.Users.id.label("user_id"), database_models.Users.name)
+            .filter(database_models.Users.id.in_(reviewer_user_ids))
+            .all()
+        )
+
+        if not editors:
+            raise HTTPException(status_code=404, detail="No editor users found in Users table")
+
+        # Step 3: Format output
         result = [{"user_id": e.user_id, "name": e.name} for e in editors]
 
         return {"project_id": project_id, "editors": result}
 
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
 
 # Endpoint to assign a review file to a reviewer
-@router.post("/reviews/link")
-def link_annotation_review(data: modelsp.AssingnReviewFileRequest, db: Session = Depends(get_db)):
+@router.get("/reviews/link/{reviewer_id}/{file_id}")
+def link_annotation_review(reviewer_id:str,file_id:int, db: Session = Depends(get_db)):
     """
     Create an entry in annotation_reviews by linking reviewer_id with annotation_id
     found via file_id from the annotations table.
@@ -805,7 +752,7 @@ def link_annotation_review(data: modelsp.AssingnReviewFileRequest, db: Session =
         # Step 1: Find the annotation_id for the given file_id
         annotation = (
             db.query(database_models.Annotations)
-            .filter(database_models.Annotations.file_id == data.file_id)
+            .filter(database_models.Annotations.file_id ==file_id)
             .first()
         )
 
@@ -815,7 +762,7 @@ def link_annotation_review(data: modelsp.AssingnReviewFileRequest, db: Session =
         # Step 2: Insert reviewer_id and annotation_id into annotation_reviews
         new_review = database_models.AnnotationReviews(
             annotation_id=annotation.id,
-            reviewer_id=data.reviewer_id
+            reviewer_id=reviewer_id
         )
 
         db.add(new_review)
@@ -825,7 +772,7 @@ def link_annotation_review(data: modelsp.AssingnReviewFileRequest, db: Session =
         return {
             "message": "Annotation review entry created successfully",
             "annotation_id": annotation.id,
-            "reviewer_id": data.reviewer_id
+            "reviewer_id": reviewer_id
         }
 
     except Exception as e:
