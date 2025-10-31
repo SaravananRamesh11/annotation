@@ -351,6 +351,23 @@ def move_file_to_review(file_id: int, db: Session = Depends(get_db),s3=Depends(s
         "new_status": file.status
     }
 
+
+@router.get("/projects/{project_id}/classes")
+def get_project_classes(project_id: int, db: Session = Depends(get_db)):
+    """
+    Get all class names from a specific project by ID.
+    """
+    project = db.query(database_models.Project).filter(database_models.Project.id == project_id).first()
+    print(project)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Return the list of classes
+    return project.classes
+
+
+
+
     
 
 
