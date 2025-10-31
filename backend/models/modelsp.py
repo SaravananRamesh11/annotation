@@ -78,7 +78,7 @@ class PromoteRequest(BaseModel):
 
 
 class AnnotationRequest(BaseModel):
-    file_ids: list[int]
+    file_id: int
     user_id: str
 
 class ProjectRequest(BaseModel):
