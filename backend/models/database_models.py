@@ -1,11 +1,10 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Date, Enum, ForeignKey,JSON
+from sqlalchemy import Boolean, Column, Integer, String, Float, DateTime, Date, Enum, ForeignKey,JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 Base = declarative_base()
-
 
 class Users(Base):
     __tablename__ = "users"
@@ -96,7 +95,9 @@ class Annotations(Base):
         default='not_reviewed',
         nullable=False
     )
-    review_cycle = Column(Integer, default=1, nullable=False)
+    review_cycle = Column(Integer, default=0, nullable=False)
+    belief = Column(Boolean, default=True, nullable=False)
+
 
     file = relationship("Files", back_populates="annotations")
     user = relationship("Users", back_populates="annotations")

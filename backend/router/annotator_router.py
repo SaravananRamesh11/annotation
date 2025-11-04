@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import os
 import random
+from sqlalchemy.exc import SQLAlchemyError
 import traceback
 from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form,Query
 from botocore.exceptions import NoCredentialsError,ClientError
@@ -9,7 +10,8 @@ from helper_functions import admin_helper
 from models import modelsp,database_models
 from database import get_db
 from utils import s3_connection
-from models import database_models,modelsp
+
+
 
 router = APIRouter(prefix="/api/employee", tags=["auth"])
 
@@ -100,13 +102,6 @@ def assign_random_file(
     print("filename is",filename)
     assigned_key = f"annotation/{project.name}/working_directory/assigned/{filename}"
     print("assigned_key is",assigned_key) # same as file_key without annotation/ in the path
-
-    
-
-
-
-    
-
     # Step 6: Move file in S3 (copy + delete)
     try:
         s3.copy_object(
@@ -299,58 +294,6 @@ def get_file_data(file_id: int, db: Session = Depends(get_db)):
     
 
 
-@router.patch("/move_to_review/{file_id}")
-def move_file_to_review(file_id: int, db: Session = Depends(get_db),s3=Depends(s3_connection.get_s3_connection)):
-    # 1️⃣ Fetch the file
-    file = db.query(database_models.Files).filter(database_models.Files.id == file_id).first()
-    if not file:
-        raise HTTPException(status_code=404, detail="File not found")
-
-    # 2️⃣ Ensure file is in assigned state
-    if file.status != "assigned":
-        raise HTTPException(status_code=400, detail="File is not in 'assigned' state")
-
-    # 3️⃣ Get associated project
-    project = db.query(database_models.Project).filter(database_models.Project.id == file.project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found for this file")
-
-    project_name = project.name
-    #print(project_name,file.s3_key)
-
-    
-
-    # 4️⃣ Construct old and new S3 paths
-    old_key = f"annotation/{project_name}/working_directory/assigned/{file.s3_key}"
-    new_key = f"annotation/{project_name}/working_directory/review/{file.s3_key}"
-
-    #print(old_key,"\n",new_key)
-    try:
-        # Copy file to new location
-        s3.copy_object(
-            Bucket=BUCKET_NAME,
-            CopySource={"Bucket": BUCKET_NAME, "Key": old_key},
-            Key=new_key)
-
-
-        # Delete the old file
-        s3.delete_object(Bucket=BUCKET_NAME, Key=old_key)
-    except ClientError as e:
-        raise HTTPException(status_code=500, detail=f"S3 operation failed: {str(e)}")
-
-    # 5️⃣ Update database record
-    file.status = "review"
-    db.commit()
-
-    return {
-        "message": f"File moved to review for project '{project_name}' successfully",
-        "file_id": file.id,
-        "project_name": project_name,
-        "old_s3_key": old_key,
-        "new_s3_key": new_key,
-        "new_status": file.status
-    }
-
 
 @router.get("/projects/{project_id}/classes")
 def get_project_classes(project_id: int, db: Session = Depends(get_db)):
@@ -366,8 +309,155 @@ def get_project_classes(project_id: int, db: Session = Depends(get_db)):
     return project.classes
 
 
+@router.post("/submit")
+def submit_file_for_review(
+    request: modelsp.SubmitFileToReview,
+    db: Session = Depends(get_db),
+    s3=Depends(s3_connection.get_s3_connection)
+):
+    """
+    Annotator submits or resubmits a file for review.
+    Moves file from assigned → review folder in S3 **only on first submission**.
+    """
+
+    try:
+        # 1️⃣ Fetch annotation entry
+        annotation = (
+            db.query(database_models.Annotations)
+            .filter(
+                database_models.Annotations.file_id == request.file_id,
+                database_models.Annotations.user_id == request.user_id
+            )
+            .first()
+        )
+        if not annotation:
+            raise HTTPException(status_code=404, detail="Annotation not found for this file and user.")
+
+        # 2️⃣ Get project and file info
+        file_obj = db.query(database_models.Files).filter(database_models.Files.id == request.file_id).first()
+        if not file_obj:
+            raise HTTPException(status_code=404, detail="File not found.")
+
+        project = db.query(database_models.Project).filter(database_models.Project.id == request.project_id).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found.")
+
+        filename = os.path.basename(file_obj.s3_key)
+
+        # 3️⃣ Detect first submission vs resubmission
+        is_first_submission = (
+            annotation.review_cycle == 0 and
+            annotation.review_state in ['not_reviewed', 'in_review']
+        )
+
+        # 4️⃣ Move file in S3 — only on first submission
+        if is_first_submission:
+            assigned_key = f"annotation/{project.name}/working_directory/assigned/{filename}"
+            review_key = f"annotation/{project.name}/working_directory/review/{filename}"
+
+            try:
+                s3.copy_object(
+                    Bucket=BUCKET_NAME,
+                    CopySource={"Bucket": BUCKET_NAME, "Key": assigned_key},
+                    Key=review_key
+                )
+                s3.delete_object(Bucket=BUCKET_NAME, Key=assigned_key)
+                #file_obj.s3_key = review_key
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Failed to move file in S3: {str(e)}")
+
+        # 5️⃣ Update annotation + file DB records
+        if is_first_submission:
+            annotation.review_state = 'not_reviewed'
+            annotation.belief = True
+            annotation.submitted_at = datetime.utcnow()
+            annotation.review_cycle += 1
+
+        else:
+            if annotation.review_state != 'rejected':
+                raise HTTPException(status_code=400, detail="File is not rejected, cannot resubmit.")
+
+            annotation.review_state = 'in_review'
+            annotation.belief = True
+            annotation.submitted_at = datetime.utcnow()
+            annotation.review_cycle += 1
+
+            # Reset last review decision (only for resubmission)
+            review_record = (
+                db.query(database_models.AnnotationReviews)
+                .filter(database_models.AnnotationReviews.annotation_id == annotation.id)
+                .order_by(database_models.AnnotationReviews.id.desc())
+                .first()
+            )
+            if review_record:
+                review_record.decision = None
+
+        # Always ensure DB file status matches
+        file_obj.status = 'review'
+
+        db.commit()
+
+        msg = "File submitted for review (first submission)." if is_first_submission else f"File resubmitted for review (cycle {annotation.review_cycle})."
+        return {"message": msg, "file_id": file_obj.id, "review_cycle": annotation.review_cycle}
+
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
-    
+@router.get("/rejected/{employee_id}/{project_id}")
+def get_rejected_files(employee_id: str, project_id: int, db: Session = Depends(get_db)):
+    """
+    Get all rejected files for a specific employee in a given project.
+    """
 
+    project = db.query(database_models.Project).filter(database_models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Fetch rejected files based on annotation state (safer than relying on reviews)
+    rejected_files = (
+        db.query(database_models.Files)
+        .join(database_models.Annotations, database_models.Annotations.file_id == database_models.Files.id)
+        .filter(
+            database_models.Files.project_id == project_id,
+            database_models.Annotations.user_id == employee_id,
+            database_models.Annotations.review_state == "rejected"
+        )
+        .distinct(database_models.Files.id)
+        .all()
+    )
+
+    if not rejected_files:
+        raise HTTPException(status_code=404, detail="No rejected files found.")
+
+    files_data = []
+    for file in rejected_files:
+        filename = file.s3_key.split("/")[-1]
+        review_key = f"annotation/{project.name}/working_directory/review/{filename}"
+        object_url = f"https://{BUCKET_NAME}.s3.eu-north-1.amazonaws.com/{review_key}"
+
+        files_data.append({
+            "file_id": file.id,
+            "filename": filename,
+            "file_type": file.type,
+            "status": file.status,
+            "s3_key": review_key,
+            "object_url": object_url
+        })
+
+    return {
+        "status": "success",
+        "project_id": project_id,
+        "employee_id": employee_id,
+        "rejected_files_count": len(files_data),
+        "files": files_data
+    }
 
