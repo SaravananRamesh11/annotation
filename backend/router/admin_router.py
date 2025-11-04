@@ -15,6 +15,7 @@ import bcrypt
 from fastapi.responses import JSONResponse
 import pandas as pd
 from helper_functions import admin_helper
+from sqlalchemy.exc import SQLAlchemyError
 
 
 
@@ -88,13 +89,14 @@ async def upload_files_to_s3(
             file_extension = os.path.splitext(file.filename)[1]
             unique_name = f"{uuid.uuid4().hex}{file_extension}"
 
-            s3_key = f"annotation/{project_name}/working_directory/raw/{unique_name}"
+            s3_keyy = f"annotation/{project_name}/working_directory/raw/{unique_name}"
+
 
             file.file.seek(0)
             s3_client.upload_fileobj(
                 file.file,
                 BUCKET_NAME,
-                s3_key,
+                s3_keyy,
                 ExtraArgs={'ContentType': file.content_type}
             )
 
@@ -119,7 +121,7 @@ async def upload_files_to_s3(
                 # Continue with other files even if one fails
                 continue
 
-            file_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
+            file_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{s3_keyy}"
             uploaded_files.append(file_url)
 
         return {
@@ -674,7 +676,7 @@ def remove_members(request: modelsp.DeleteMembersRequest, db: Session = Depends(
 
 
 
-##################################reviewer##############################################################
+############################################################################reviewer##############################################################
 
 @router.get("/project/{project_id}/unassigned-reviews")
 def get_unassigned_review_files(
@@ -818,3 +820,81 @@ def link_multiple_annotations_to_reviewer(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+
+
+@router.get("/assign_review/{file_id}/{reviewer_id}")
+def assign_file_for_review(
+    file_id:int, reviewer_id:str,db: Session = Depends(get_db)
+):
+    """
+    Admin assigns a file to a reviewer.
+    Creates an entry in AnnotationReviews and updates annotation state.
+    """
+    print("hello world")
+    try:
+        # 1️⃣ Fetch the annotation record for the given file
+        annotation = (
+            db.query(database_models.Annotations)
+            .filter(database_models.Annotations.file_id == file_id)
+            .first()
+        )
+        if not annotation:
+            raise HTTPException(status_code=404, detail="Annotation record not found for this file.")
+
+        # # 2️⃣ Fetch reviewer (user)
+        # reviewer = (
+        #     db.query(database_models.Users)
+        #     .filter(database_models.Users.id == reviewer_id)
+        #     .first()
+        # )
+        # if not reviewer:
+        #     raise HTTPException(status_code=404, detail="Reviewer not found.")
+
+        # if reviewer.role != "reviewer":
+        #     raise HTTPException(status_code=400, detail="Given user is not a reviewer.")
+
+        # 3️⃣ Prevent multiple active reviews for the same annotation
+        existing_review = (
+            db.query(database_models.AnnotationReviews)
+            .filter(
+                database_models.AnnotationReviews.annotation_id == annotation.id,
+                database_models.AnnotationReviews.decision.is_(None)
+            )
+            .first()
+        )
+        if existing_review:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Annotation {annotation.id} already has an active review assignment."
+            )
+
+        # 4️⃣ Create new AnnotationReviews record
+        new_review = database_models.AnnotationReviews(
+            annotation_id=annotation.id,
+            reviewer_id=reviewer_id,
+            decision=None,  # reviewer hasn’t decided yet
+        )
+        db.add(new_review)
+
+        # 5️⃣ Update annotation review_state
+        if annotation.review_state == "not_reviewed":
+            annotation.review_state = "in_review"
+
+        db.commit()
+
+        return {
+            "message": f"File ID {file_id} assigned to Reviewer ID {reviewer_id} successfully.",
+            "annotation_id": annotation.id,
+            "review_state": annotation.review_state
+        }
+
+    except SQLAlchemyError as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+    

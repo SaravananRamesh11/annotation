@@ -100,3 +100,14 @@ class SaveAnnotationData(BaseModel):
 class AssingnReviewFileRequest(BaseModel):
     reviewer_id: str
     file_id: int
+
+
+class SubmitFileToReview(BaseModel):
+    project_id: int
+    file_id: int
+    user_id: str
+
+class RejectFileFromReview(BaseModel):
+    project_id: int
+    file_id: int
+    reviewer_id: str
