@@ -90,8 +90,7 @@ class BoundingBox(BaseModel):
     y: float
     width: float
     height: float
-    rotation: float
-    classes: List[Dict[str, Any]] 
+    classes: Dict[str, Any] 
 
 class SaveAnnotationData(BaseModel):
     data: List[BoundingBox]
