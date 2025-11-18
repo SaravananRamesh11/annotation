@@ -439,6 +439,51 @@ def get_project_files(
     }
 
 
+@router.get("/projects/{project_id}/task-counts")
+def get_task_counts_by_status(
+    project_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get task counts for all statuses in a project.
+    Useful for displaying counts in the dropdown filter UI.
+    """
+    # 1️⃣ Verify project exists
+    project = db.query(database_models.Project).filter(database_models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # 2️⃣ Get counts for each status
+    counts = {
+        "raw": db.query(database_models.Files).filter(
+            database_models.Files.project_id == project_id,
+            database_models.Files.status == "pending"
+        ).count(),
+        "assigned": db.query(database_models.Files).filter(
+            database_models.Files.project_id == project_id,
+            database_models.Files.status == "assigned"
+        ).count(),
+        "review": db.query(database_models.Files).filter(
+            database_models.Files.project_id == project_id,
+            database_models.Files.status == "review"
+        ).count(),
+        "completed": db.query(database_models.Files).filter(
+            database_models.Files.project_id == project_id,
+            database_models.Files.status == "completed"
+        ).count()
+    }
+    
+    # 3️⃣ Calculate total
+    total = sum(counts.values())
+    
+    return {
+        "project_id": project_id,
+        "project_name": project.name,
+        "counts": counts,
+        "total": total
+    }
+
+
 @router.get("/{project_id}/available-users")
 def get_users_not_in_project(project_id: int, db: Session = Depends(get_db)):
     pm_alias = aliased(database_models.ProjectMember)
