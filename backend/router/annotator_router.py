@@ -212,7 +212,7 @@ def get_user_assigned_files(
         )
 
         if not annotations:
-            raise HTTPException(status_code=404, detail="No assigned files found for this user")
+            return []
 
         result = []
 
