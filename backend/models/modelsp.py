@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional,List, Any, Dict
 from sqlalchemy.dialects.postgresql import JSONB
+from uuid import UUID
 
 
 class Users(BaseModel):
@@ -22,7 +23,7 @@ class ProjectCreate(BaseModel): #http://localhost:8000/api/admin/create_project 
 
 
 class DeleteMembersRequest(BaseModel):
-    project_id: int
+    project_id: UUID
     user_ids: List[str]
    
 
@@ -102,11 +103,11 @@ class AssingnReviewFileRequest(BaseModel):
 
 
 class SubmitFileToReview(BaseModel):
-    project_id: int
+    project_id: UUID
     file_id: int
     user_id: str
 
 class RejectFileFromReview(BaseModel):
-    project_id: int
+    project_id: UUID
     file_id: int
     reviewer_id: str

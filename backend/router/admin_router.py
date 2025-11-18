@@ -16,6 +16,8 @@ from fastapi.responses import JSONResponse
 import pandas as pd
 from helper_functions import admin_helper
 from sqlalchemy.exc import SQLAlchemyError
+from uuid import UUID
+
 
 
 
@@ -303,7 +305,7 @@ async def add_project_members(data: modelsp.AddProjectMembers, db: Session = Dep
 # delete_project endpoint
 @router.delete( "/delete_project/{project_id}")
 async def delete_project(
-    project_id: int,
+    project_id: UUID,
     db: Session = Depends(get_db),
     s3_client=Depends(s3_connection.get_s3_connection)
 ):
@@ -387,7 +389,7 @@ async def get_all_user(db: Session = Depends(get_db)):
 
 @router.get("/projects/{project_id}/files")
 def get_project_files(
-    project_id: int,
+    project_id: UUID,
     db: Session = Depends(get_db),
     s3_client=Depends(s3_connection.get_s3_connection)
 ):
@@ -440,7 +442,7 @@ def get_project_files(
 
 
 @router.get("/{project_id}/available-users")
-def get_users_not_in_project(project_id: int, db: Session = Depends(get_db)):
+def get_users_not_in_project(project_id: uuid.UUID, db: Session = Depends(get_db)):
     pm_alias = aliased(database_models.ProjectMember)
     query = (
         db.query(database_models.Users)
@@ -568,7 +570,7 @@ def assign_multiple_annotations(
 
 # end point to get annotators for a project, excluding those with multiple roles(editor)
 @router.get("/annotators/{project_id}", response_model=list[modelsp.AnnotatorOut])
-def get_annotators(project_id: int, db: Session = Depends(get_db)):
+def get_annotators(project_id: UUID, db: Session = Depends(get_db)):
     try:
         # Subquery: Find user_ids who have multiple roles in the same project
         multi_role_users = db.query(database_models.ProjectMember.user_id).filter(
@@ -595,7 +597,7 @@ def get_annotators(project_id: int, db: Session = Depends(get_db)):
     
 # endpoint for promoting multiple annotators
 @router.put("/annotators/{project_id}/promote", response_model=dict)
-def promote_multiple_annotators_to_editors(project_id: int, request: modelsp.PromoteRequest, db: Session = Depends(get_db)):
+def promote_multiple_annotators_to_editors(project_id: UUID, request: modelsp.PromoteRequest, db: Session = Depends(get_db)):
     try:
         # Update all annotators in the given list
         updated_count = db.query(database_models.ProjectMember).filter(
@@ -618,7 +620,7 @@ def promote_multiple_annotators_to_editors(project_id: int, request: modelsp.Pro
 
 # endpoint to display all the members in project    
 @router.get("/{project_id}/members", response_model=dict)
-def get_project_members(project_id:int, db: Session = Depends(get_db)):
+def get_project_members(project_id:UUID, db: Session = Depends(get_db)):
     try:
         # Step 1: Join ProjectMember and Users tables
         members = (
@@ -680,7 +682,7 @@ def remove_members(request: modelsp.DeleteMembersRequest, db: Session = Depends(
 
 @router.get("/project/{project_id}/unassigned-reviews")
 def get_unassigned_review_files(
-    project_id: int,
+    project_id: UUID,
     db: Session = Depends(get_db)
 ):
     # Fetch files that are in review and not yet reviewed
@@ -736,7 +738,7 @@ def get_unassigned_review_files(
 
 
 @router.get("/projects/{project_id}/editors")
-def get_project_editors(project_id: int, db: Session = Depends(get_db)):
+def get_project_editors(project_id: UUID, db: Session = Depends(get_db)):
     """
     Fetch all editors (user_id and name) for a given project.
     Uses subquery approach instead of join to ensure all reviewers are returned.
@@ -933,7 +935,7 @@ def assign_file_for_review(
     
 
 @router.get("/project_name/{projectId}")
-def project_name(projectId:int,db: Session = Depends(get_db)):
+def project_name(projectId:UUID,db: Session = Depends(get_db)):
     project_name = (
     db.query(database_models.Project.name)
       .filter(database_models.Project.id == projectId)
