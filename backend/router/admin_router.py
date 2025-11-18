@@ -617,8 +617,8 @@ def promote_multiple_annotators_to_editors(project_id: int, request: modelsp.Pro
     
 
 # endpoint to display all the members in project    
-@router.post("/projects/members", response_model=dict)
-def get_project_members(request: modelsp.ProjectRequest, db: Session = Depends(get_db)):
+@router.get("/{project_id}/members", response_model=dict)
+def get_project_members(project_id:int, db: Session = Depends(get_db)):
     try:
         # Step 1: Join ProjectMember and Users tables
         members = (
@@ -631,7 +631,7 @@ def get_project_members(request: modelsp.ProjectRequest, db: Session = Depends(g
                 database_models.Users,
                 database_models.Users.id == database_models.ProjectMember.user_id
             )
-            .filter(database_models.ProjectMember.project_id == request.project_id)
+            .filter(database_models.ProjectMember.project_id == project_id)
             .all()
         )
 
@@ -651,7 +651,7 @@ def get_project_members(request: modelsp.ProjectRequest, db: Session = Depends(g
 
         # Step 4: Return both count and members
         return {
-            "member_count": len(member_list),
+            
             "members": member_list
         }
 
@@ -683,23 +683,56 @@ def get_unassigned_review_files(
     project_id: int,
     db: Session = Depends(get_db)
 ):
-    
+    # Fetch files that are in review and not yet reviewed
     results = (
         db.query(database_models.Files)
-        .join(database_models.Annotations, database_models.Files.id == database_models.Annotations.file_id)
+        .join(
+            database_models.Annotations,
+            database_models.Files.id == database_models.Annotations.file_id
+        )
         .filter(
             database_models.Files.project_id == project_id,
-            database_models.Files.status == "review",          # file is in review stage
-            database_models.Annotations.review_state == "not_reviewed"  # not yet assigned to reviewer
+            database_models.Files.status == "review",
+            database_models.Annotations.review_state == "not_reviewed"
         )
         .all()
     )
 
+    # Build actual S3 URL for each file
+    file_urls = []
+    for file in results:
+        if not file.s3_key:
+            continue  # skip invalid rows
+
+        # file.s3_key only holds "abc123.png" — you must rebuild the full path
+        # review files live inside: annotation/<project_name>/working_directory/review/<filename>
+
+        project = (
+            db.query(database_models.Project)
+            .filter(database_models.Project.id == project_id)
+            .first()
+        )
+        if not project:
+            continue
+
+        project_name = project.name
+
+        # Construct full S3 path
+        s3_key_full = f"annotation/{project_name}/working_directory/review/{file.s3_key}"
+
+        # Construct public S3 URL
+        file_url = (
+            f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{s3_key_full}"
+        )
+
+        file_urls.append(file_url)
+
     return {
         "project_id": project_id,
-        "count": len(results),
-        "unassigned_review_files": results
+        "count": len(file_urls),
+        "unassigned_review_files": file_urls
     }
+
 
 
 @router.get("/projects/{project_id}/editors")
@@ -899,3 +932,11 @@ def assign_file_for_review(
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
     
 
+@router.get("/project_name/{projectId}")
+def project_name(projectId:int,db: Session = Depends(get_db)):
+    project_name = (
+    db.query(database_models.Project.name)
+      .filter(database_models.Project.id == projectId)
+      .scalar()
+            )
+    return project_name
