@@ -23,36 +23,71 @@ BUCKET_NAME =  os.getenv("BUCKET_NAME")
 
 
 
+# @router.get("/user_projects/{user_id}")
+# def get_user_projects(user_id: str, db: Session = Depends(get_db)):
+#     # Step 1: Get all project IDs for this user from ProjectMember
+#     project_ids = (
+#         db.query(database_models.ProjectMember.project_id)
+#         .filter(database_models.ProjectMember.user_id == user_id)
+#         .all()
+#     )
+
+#     # Flatten list of tuples to a simple list of IDs
+#     project_ids = [pid[0] for pid in project_ids]
+
+#     if not project_ids:
+#         raise HTTPException(status_code=404, detail="No projects found for this user")
+
+#     # Step 2: Fetch all projects using the IDs
+#     projects = db.query(database_models.Project).filter(database_models.Project.id.in_(project_ids)).all()
+
+#     # Step 3: Return detailed project info
+#     return [
+#         {
+#             "project_id": project.id,
+#             "name": project.name,
+#             "description": project.description,
+#             "classes": project.classes,
+#             "created_at": project.created_at,
+#             "updated_at": project.updated_at
+#         }
+#         for project in projects
+#     ]
+
+
 @router.get("/user_projects/{user_id}")
 def get_user_projects(user_id: str, db: Session = Depends(get_db)):
-    # Step 1: Get all project IDs for this user from ProjectMember
-    project_ids = (
-        db.query(database_models.ProjectMember.project_id)
+
+    # Join Projects with ProjectMember to pick up project_role too
+    results = (
+        db.query(
+            database_models.Project,
+            database_models.ProjectMember.project_role
+        )
+        .join(
+            database_models.ProjectMember,
+            database_models.Project.id == database_models.ProjectMember.project_id
+        )
         .filter(database_models.ProjectMember.user_id == user_id)
         .all()
     )
 
-    # Flatten list of tuples to a simple list of IDs
-    project_ids = [pid[0] for pid in project_ids]
-
-    if not project_ids:
+    if not results:
         raise HTTPException(status_code=404, detail="No projects found for this user")
 
-    # Step 2: Fetch all projects using the IDs
-    projects = db.query(database_models.Project).filter(database_models.Project.id.in_(project_ids)).all()
-
-    # Step 3: Return detailed project info
-    return [
-        {
+    # Build the response
+    response = []
+    for project, role in results:
+        response.append({
             "project_id": project.id,
             "name": project.name,
             "description": project.description,
-            "classes": project.classes,
             "created_at": project.created_at,
-            "updated_at": project.updated_at
-        }
-        for project in projects
-    ]
+            "updated_at": project.updated_at,
+            "role": role                
+        })
+
+    return response
 
 
 

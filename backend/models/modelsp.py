@@ -18,7 +18,7 @@ class Users(BaseModel):
 class ProjectCreate(BaseModel): #http://localhost:8000/api/admin/create_project   "for request" of the post request
     project_name: str
     description: str | None = None
-    classes: list[str] #List[Dict[str, Any]]
+    classes: List[Dict[str, Any]]
 
 
 class DeleteMembersRequest(BaseModel):
@@ -78,7 +78,7 @@ class PromoteRequest(BaseModel):
 
 
 class AnnotationRequest(BaseModel):
-    file_id: int
+    file_ids: List[int]
     user_id: str
 
 class ProjectRequest(BaseModel):
