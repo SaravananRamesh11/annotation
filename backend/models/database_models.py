@@ -3,6 +3,8 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import UUID
+import uuid
 
 Base = declarative_base()
 
@@ -21,60 +23,82 @@ class Users(Base):
     annotations = relationship("Annotations", back_populates="user")
     reviews = relationship("AnnotationReviews", back_populates="reviewer")
 
+
 class ProjectMember(Base):
     __tablename__ = "project_members"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+
+    # FIXED: was Integer → now UUID
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    project_role = Column(String, nullable=False)  # "annotator" or "reviewer"
+    project_role = Column(String, nullable=False)
     joined_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     project = relationship("Project", back_populates="members")
     user = relationship("Users", back_populates="project_links")
 
 
+
 class Project(Base):
     __tablename__ = "projects"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,            # Python-side UUID generation
+        unique=True,
+        nullable=False
+    )
+
     name = Column(String(100), nullable=False)
     description = Column(String(300), nullable=True)
-    classes = Column(JSONB, nullable=False)  # e.g. ["car", "bus", "bike"]
+    classes = Column(JSONB, nullable=False)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(),
                         onupdate=func.now(), nullable=False)
 
-    # Cascading deletes: deleting project deletes members and files
     members = relationship(
         "ProjectMember",
         back_populates="project",
         cascade="all, delete-orphan"
     )
+
     files = relationship(
         "Files",
         back_populates="project",
         cascade="all, delete-orphan"
     )
 
+
+
 class Files(Base):
     __tablename__ = "files"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    s3_key = Column(String(255), unique=True, nullable=False, index=True)  # unique S3 key
+
+    # FIXED: was Integer → now UUID
+    project_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False
+    )
+
+    s3_key = Column(String(255), unique=True, nullable=False, index=True)
     type = Column(Enum('image', 'video', name="file_type"), nullable=False)
     status = Column(Enum('pending', 'assigned', 'review', 'completed', name="file_status"), nullable=False, default='pending')
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     project = relationship("Project", back_populates="files")
-    # Cascading deletes: deleting a file deletes all its annotations
-    annotations = relationship(
-        "Annotations",
-        back_populates="file",
-        cascade="all, delete-orphan"
-    )
+    annotations = relationship("Annotations", back_populates="file", cascade="all, delete-orphan")
+
 
 class Annotations(Base):
     __tablename__ = "annotations"

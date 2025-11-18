@@ -10,7 +10,7 @@ from helper_functions import admin_helper
 from models import modelsp,database_models
 from database import get_db
 from utils import s3_connection
-
+from uuid import UUID
 
 
 router = APIRouter(prefix="/api/employee", tags=["auth"])
@@ -93,7 +93,7 @@ def get_user_projects(user_id: str, db: Session = Depends(get_db)):
 
 @router.get("/{project_id}/assign-file/{employee_id}")
 def assign_random_file(
-    project_id: int,
+    project_id: UUID,
     employee_id: str,
     db: Session = Depends(get_db),
     s3=Depends(s3_connection.get_s3_connection)
@@ -303,7 +303,7 @@ async def save_annotation(
 
 # Endpoint to get the saved annotation data for a file   
 @router.get("/file/{file_id}/data")
-def get_file_data(file_id: int, db: Session = Depends(get_db)):
+def get_file_data(file_id: UUID, db: Session = Depends(get_db)):
     """
     Fetch the 'data' and 'last_saved_at' fields for a given file_id.
     """
@@ -331,7 +331,7 @@ def get_file_data(file_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/projects/{project_id}/classes")
-def get_project_classes(project_id: int, db: Session = Depends(get_db)):
+def get_project_classes(project_id: UUID, db: Session = Depends(get_db)):
     """
     Get all class names from a specific project by ID.
     """
@@ -448,7 +448,7 @@ def submit_file_for_review(
 
 
 @router.get("/rejected/{employee_id}/{project_id}")
-def get_rejected_files(employee_id: str, project_id: int, db: Session = Depends(get_db)):
+def get_rejected_files(employee_id: str, project_id: UUID, db: Session = Depends(get_db)):
     """
     Get all rejected files for a specific employee in a given project.
     """
