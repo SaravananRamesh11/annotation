@@ -441,9 +441,9 @@ def get_project_files(
     }
 
 
-@router.get("/projects/{project_id}/task-counts")
+@router.get("/projects/{project_name}/task-counts")
 def get_task_counts_by_status(
-    project_id: int,
+    project_name: str,
     db: Session = Depends(get_db)
 ):
     """
@@ -451,9 +451,11 @@ def get_task_counts_by_status(
     Useful for displaying counts in the dropdown filter UI.
     """
     # 1️⃣ Verify project exists
-    project = db.query(database_models.Project).filter(database_models.Project.id == project_id).first()
+    project = db.query(database_models.Project).filter(database_models.Project.name == project_name).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    
+    project_id = project.id
     
     # 2️⃣ Get counts for each status
     counts = {
@@ -480,7 +482,7 @@ def get_task_counts_by_status(
     
     return {
         "project_id": project_id,
-        "project_name": project.name,
+        "project_name": project_name,
         "counts": counts,
         "total": total
     }
