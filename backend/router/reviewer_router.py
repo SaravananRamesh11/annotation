@@ -16,7 +16,7 @@ import bcrypt
 from fastapi.responses import JSONResponse
 import pandas as pd
 from helper_functions import admin_helper
-from uuid import UUID
+
 load_dotenv()
 
 AWS_ACCESS_KEY =os.getenv("AWS_ACCESS_KEY")
@@ -104,7 +104,7 @@ def accept_annotation(file_id: int, db: Session = Depends(get_db), s3=Depends(s3
 
 
 @router.get("/resubmitted-files/{project_id}/{reviewer_id}")
-def get_resubmitted_files(project_id: UUID, reviewer_id: str, db: Session = Depends(get_db)):
+def get_resubmitted_files(project_id: str, reviewer_id: str, db: Session = Depends(get_db)):
     # Step 1: Verify reviewer is part of the project
     reviewer_member = (
         db.query(database_models.ProjectMember)
