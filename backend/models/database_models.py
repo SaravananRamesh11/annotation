@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, String, Float, DateTime, Date, Enum, ForeignKey,JSON
+from sqlalchemy import Boolean, Column, Integer, String, Float, DateTime, Date, Enum, ForeignKey,JSON,Sequence,text, event, DDL
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB
@@ -7,6 +7,63 @@ from sqlalchemy.dialects.postgresql import UUID
 import uuid
 
 Base = declarative_base()
+
+project_sequence_name = "project_id_seq"
+
+# Create the sequence explicitly (guaranteed to run before tables)
+event.listen(
+    Base.metadata,
+    "before_create",
+    DDL(f"CREATE SEQUENCE IF NOT EXISTS {project_sequence_name} START 1 INCREMENT 1")
+)
+
+# Drop sequence if dropping tables (optional but clean)
+event.listen(
+    Base.metadata,
+    "after_drop",
+    DDL(f"DROP SEQUENCE IF EXISTS {project_sequence_name}")
+)
+
+
+class Project(Base):
+    __tablename__ = "projects"
+
+    id = Column(
+        String(10),
+        primary_key=True,
+        server_default=func.concat(
+            "VS",
+            func.lpad(
+                func.nextval(text(f"'{project_sequence_name}'")).cast(String),
+                6,
+                "0"
+            )
+        ),
+        nullable=False,
+        unique=True
+    )
+
+    name = Column(String(100), nullable=False)
+    description = Column(String(300), nullable=True)
+    classes = Column(JSONB, nullable=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    members = relationship(
+        "ProjectMember",
+        back_populates="project",
+        cascade="all, delete-orphan"
+    )
+
+    files = relationship(
+        "Files",
+        back_populates="project",
+        cascade="all, delete-orphan"
+    )
+
+
+
 
 class Users(Base):
     __tablename__ = "users"
@@ -31,7 +88,7 @@ class ProjectMember(Base):
 
     # FIXED: was Integer → now UUID
     project_id = Column(
-        UUID(as_uuid=True),
+        String,
         ForeignKey("projects.id", ondelete="CASCADE"),
         nullable=False
     )
@@ -45,36 +102,7 @@ class ProjectMember(Base):
 
 
 
-class Project(Base):
-    __tablename__ = "projects"
 
-    id = Column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,            # Python-side UUID generation
-        unique=True,
-        nullable=False
-    )
-
-    name = Column(String(100), nullable=False)
-    description = Column(String(300), nullable=True)
-    classes = Column(JSONB, nullable=False)
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(),
-                        onupdate=func.now(), nullable=False)
-
-    members = relationship(
-        "ProjectMember",
-        back_populates="project",
-        cascade="all, delete-orphan"
-    )
-
-    files = relationship(
-        "Files",
-        back_populates="project",
-        cascade="all, delete-orphan"
-    )
 
 
 
@@ -85,7 +113,7 @@ class Files(Base):
 
     # FIXED: was Integer → now UUID
     project_id = Column(
-        UUID(as_uuid=True),
+        String,
         ForeignKey("projects.id", ondelete="CASCADE"),
         nullable=False
     )

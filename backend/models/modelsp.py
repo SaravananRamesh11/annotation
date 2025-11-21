@@ -23,7 +23,7 @@ class ProjectCreate(BaseModel): #http://localhost:8000/api/admin/create_project 
 
 
 class DeleteMembersRequest(BaseModel):
-    project_id: UUID
+    project_id: str
     user_ids: List[str]
    
 
@@ -103,11 +103,11 @@ class AssingnReviewFileRequest(BaseModel):
 
 
 class SubmitFileToReview(BaseModel):
-    project_id: UUID
+    project_id: str
     file_id: int
     user_id: str
 
 class RejectFileFromReview(BaseModel):
-    project_id: UUID
+    project_id: str
     file_id: int
     reviewer_id: str
