@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import os
 import random
 from sqlalchemy.exc import SQLAlchemyError
@@ -13,12 +13,17 @@ from utils import s3_connection
 
 
 
+
 router = APIRouter(prefix="/api/employee", tags=["auth"])
 
 AWS_ACCESS_KEY =os.getenv("AWS_ACCESS_KEY")
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
 AWS_REGION =   os.getenv("AWS_REGION")
 BUCKET_NAME =  os.getenv("BUCKET_NAME")
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
 
 
 
@@ -233,10 +238,12 @@ def get_user_assigned_files(
             # Extract just the hex filename (remove any folder prefixes)
             filename = os.path.basename(file.s3_key)
 
+            print("hello sarva",file.s3_key)
+            print("hello sarva filename",filename)
             # Construct the actual object URL manually
             object_url = (
                 f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/"
-                f"annotation/{project.name}/working_directory/{file.status}/{filename}"
+                f"annotation/{project.name}/working_directory/{file.status}/{filename}/{filename}"
             )
 
             # ✅ Include assigned_by and assigned_at fields
@@ -263,7 +270,7 @@ def get_user_assigned_files(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
 
-    
+
 # Endpoint to save annotation data for a file
 @router.put("/save_annotation/{file_id}")
 async def save_annotation(
@@ -385,7 +392,15 @@ def submit_file_for_review(
             annotation.review_state in ['not_reviewed', 'in_review']
         )
 
-        # 4️⃣ Move file in S3 — only on first submission
+        # 4️⃣ Update annotation + file DB records
+        if is_first_submission:
+            annotation.review_state = 'not_reviewed'
+            annotation.belief = True
+            annotation.submitted_at = datetime.now(IST)
+            print("the time is",annotation.submitted_at)
+            annotation.review_cycle += 1
+
+          # 5️⃣ Move file in S3 — only on first submission
         if is_first_submission:
             assigned_key = f"annotation/{project.name}/working_directory/assigned/{filename}"
             review_key = f"annotation/{project.name}/working_directory/review/{filename}"
@@ -401,12 +416,7 @@ def submit_file_for_review(
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"Failed to move file in S3: {str(e)}")
 
-        # 5️⃣ Update annotation + file DB records
-        if is_first_submission:
-            annotation.review_state = 'not_reviewed'
-            annotation.belief = True
-            annotation.submitted_at = datetime.utcnow()
-            annotation.review_cycle += 1
+       
 
         else:
             if annotation.review_state != 'rejected':
@@ -414,7 +424,7 @@ def submit_file_for_review(
 
             annotation.review_state = 'in_review'
             annotation.belief = True
-            annotation.submitted_at = datetime.utcnow()
+            annotation.submitted_at = datetime.now(timezone.ist)
             annotation.review_cycle += 1
 
             # Reset last review decision (only for resubmission)
@@ -489,7 +499,7 @@ def get_rejected_files(employee_id: str, project_id: str, db: Session = Depends(
         })
 
     return {
-        "status": "success",
+        "status": "rejected",
         "project_id": project_id,
         "employee_id": employee_id,
         "rejected_files_count": len(files_data),

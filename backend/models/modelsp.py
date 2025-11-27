@@ -111,3 +111,8 @@ class RejectFileFromReview(BaseModel):
     project_id: str
     file_id: int
     reviewer_id: str
+
+
+class AssignFileReviewer(BaseModel):
+    reviewer_id: str
+    file_ids: List[int]
