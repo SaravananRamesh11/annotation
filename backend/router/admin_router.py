@@ -55,25 +55,26 @@ async def upload_files_to_s3(
         print(f"proofImages count={len(proofImages)}")
 
         # --- Create directory structure for the project ---
-        # Create working_directory subdirectories
+        label_dir = f"annotation/{project_name}/labels/"
         working_raw_dir = f"annotation/{project_name}/working_directory/raw/"
         working_assigned_dir = f"annotation/{project_name}/working_directory/assigned/"
         working_review_dir = f"annotation/{project_name}/working_directory/review/"
-        
-        # Create finished_directory subdirectories
         finished_completed_dir = f"annotation/{project_name}/finished_directory/completed/"
-        
-        # Create all directories
+
+        # Create S3 "folders" (prefixes)
+        s3_client.put_object(Bucket=BUCKET_NAME, Key=label_dir)
         s3_client.put_object(Bucket=BUCKET_NAME, Key=working_raw_dir)
         s3_client.put_object(Bucket=BUCKET_NAME, Key=working_assigned_dir)
         s3_client.put_object(Bucket=BUCKET_NAME, Key=working_review_dir)
         s3_client.put_object(Bucket=BUCKET_NAME, Key=finished_completed_dir)
-        
-        print(f"✅ Created directory structure:")
+
+        print("✅ Created directory structure:")
+        print(f"  - {label_dir}")
         print(f"  - {working_raw_dir}")
         print(f"  - {working_assigned_dir}")
         print(f"  - {working_review_dir}")
         print(f"  - {finished_completed_dir}")
+
 
         # --- Get project_id from project_name ---
         project = db.query(database_models.Project).filter(database_models.Project.name == project_name).first()
@@ -106,7 +107,7 @@ async def upload_files_to_s3(
             try:
                 new_file = database_models.Files(
                     project_id=project_id,
-                    s3_key=unique_name,  # Store only the hexadecimal filename
+                    s3_key=s3_keyy,  # Store only the hexadecimal filename
                     type='image',
                     status='pending'
                 )
@@ -115,7 +116,7 @@ async def upload_files_to_s3(
                 db.commit()
                 db.refresh(new_file)
                 
-                print(f"💾 Saved file record: ID={new_file.id}, s3_key={unique_name}")
+                print(f"💾 Saved file record: ID={new_file.id}, s3_key={s3_keyy}")
                 
             except Exception as db_error:
                 db.rollback()
@@ -556,10 +557,10 @@ def assign_multiple_annotations(
             new_annotation = database_models.Annotations(
                 file_id=file_id,
                 user_id=request.user_id,
-                assigned_at=datetime.now(timezone.utc),
+                assigned_at=datetime.now(timezone.ist),
                 data=None,
                 assigned_by='admin',
-                last_saved_at=datetime.now(timezone.utc),
+                last_saved_at=datetime.now(timezone.ist),
                 submitted_at=None
             )
             db.add(new_annotation)
@@ -833,10 +834,9 @@ def get_project_editors(project_id: str, db: Session = Depends(get_db)):
 
 
 # Endpoint to assign multiple files to reviewer
-@router.post("/reviews/link/{reviewer_id}")
+@router.post("/reviews/link")
 def link_multiple_annotations_to_reviewer(
-    reviewer_id: str,
-    file_ids: List[int],
+    request: modelsp.AssignFileReviewer,
     db: Session = Depends(get_db)
 ):
     """
@@ -845,12 +845,12 @@ def link_multiple_annotations_to_reviewer(
     """
 
     try:
-        if not file_ids:
+        if not request.file_ids:
             raise HTTPException(status_code=400, detail="file_ids list cannot be empty")
 
         created_links = []
 
-        for file_id in file_ids:
+        for file_id in request.file_ids:
             # Step 1️⃣: Find the annotation for each file_id
             annotation = (
                 db.query(database_models.Annotations)
@@ -867,7 +867,7 @@ def link_multiple_annotations_to_reviewer(
                 db.query(database_models.AnnotationReviews)
                 .filter(
                     database_models.AnnotationReviews.annotation_id == annotation.id,
-                    database_models.AnnotationReviews.reviewer_id == reviewer_id
+                    database_models.AnnotationReviews.reviewer_id == request.reviewer_id
                 )
                 .first()
             )
@@ -879,7 +879,7 @@ def link_multiple_annotations_to_reviewer(
             # Step 3️⃣: Create new review entry
             new_review = database_models.AnnotationReviews(
                 annotation_id=annotation.id,
-                reviewer_id=reviewer_id
+                reviewer_id=request.reviewer_id
             )
 
             db.add(new_review)
@@ -895,7 +895,7 @@ def link_multiple_annotations_to_reviewer(
             raise HTTPException(status_code=400, detail="No new annotation links were created (may already exist or invalid file_ids)")
 
         return {
-            "message": f"Successfully linked {len(created_links)} annotation(s) to reviewer {reviewer_id}",
+            "message": f"Successfully linked {len(created_links)} annotation(s) to reviewer {request.reviewer_id}",
             "created_links": created_links
         }
 
