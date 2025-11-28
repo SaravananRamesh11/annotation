@@ -111,6 +111,7 @@ class RejectFileFromReview(BaseModel):
     project_id: str
     file_id: int
     reviewer_id: str
+    rejection_description:str
 
 
 class AssignFileReviewer(BaseModel):
