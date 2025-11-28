@@ -1,3 +1,4 @@
+from sqlalchemy.sql.elements import Null
 import traceback
 from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form,Query
 from sqlalchemy import and_, func, select, update,delete,exists,not_
@@ -17,6 +18,7 @@ from fastapi.responses import JSONResponse
 import pandas as pd
 from helper_functions import admin_helper
 import json
+import random
 
 load_dotenv()
 
@@ -176,6 +178,7 @@ def accept_annotation(
 
     # Step 2: Approve annotation
     annotation.review_state = 'approved'
+    annotation.rejection_description=Null
     db.commit()
     db.refresh(annotation)
 
@@ -239,7 +242,38 @@ def accept_annotation(
     review_record.reviewed_at = datetime.now()
     db.commit()
 
-    # Step 8: Build JSON labels
+    # # Step 8: Build JSON labels
+    # annotation_rows = db.query(database_models.Annotations).filter(
+    #     database_models.Annotations.file_id == file_id
+    # ).all()
+
+    # if not annotation_rows:
+    #     raise HTTPException(status_code=404, detail="No annotations found for this file")
+
+    # annotation_list = []
+
+    # for row in annotation_rows:
+    #     if not row.data:
+    #         continue
+
+    #     for item in row.data:
+    #         annotation_list.append({
+    #             "id": item.get("id"),
+    #             "x": item.get("x"),
+    #             "y": item.get("y"),
+    #             "width": item.get("width"),
+    #             "height": item.get("height"),
+    #             "class_name": item.get("classes", {}).get("className"),
+    #             "attribute": item.get("classes", {}).get("attribute"),
+    #         })
+
+    # json_content = json.dumps(annotation_list, indent=4)
+
+
+
+
+
+
     annotation_rows = db.query(database_models.Annotations).filter(
         database_models.Annotations.file_id == file_id
     ).all()
@@ -247,22 +281,12 @@ def accept_annotation(
     if not annotation_rows:
         raise HTTPException(status_code=404, detail="No annotations found for this file")
 
+    # Combine all annotation.data arrays into one
     annotation_list = []
 
     for row in annotation_rows:
-        if not row.data:
-            continue
-
-        for item in row.data:
-            annotation_list.append({
-                "id": item.get("id"),
-                "x": item.get("x"),
-                "y": item.get("y"),
-                "width": item.get("width"),
-                "height": item.get("height"),
-                "class_name": item.get("classes", {}).get("className"),
-                "attribute": item.get("classes", {}).get("attribute"),
-            })
+        if row.data:
+            annotation_list.extend(row.data)   # ← DIRECTLY USE DB JSON
 
     json_content = json.dumps(annotation_list, indent=4)
 
@@ -367,6 +391,7 @@ def reject_file(request: modelsp.RejectFileFromReview, db: Session = Depends(get
     annotation.belief = False
     annotation.review_state = 'rejected'
     annotation.submitted_at = datetime.utcnow()
+    annotation.rejection_description=request.rejection_description
 
     file = db.query(database_models.Files).filter(database_models.Files.id == request.file_id).first()
     if file:
@@ -494,7 +519,7 @@ def get_assigned_review_files(
     )
 
     if not assigned_files:
-        raise HTTPException(status_code=404, detail="No assigned review files found.")
+        return []
 
     files_output = []
 
@@ -505,6 +530,7 @@ def get_assigned_review_files(
 
         files_output.append({
             "file_id": file_obj.id,
+            "assigned_by":annotation.assigned_by,
             "filename": os.path.basename(s3_key),
             "file_type": file_obj.type,
             "status": file_obj.status,
@@ -514,10 +540,240 @@ def get_assigned_review_files(
             "annotation_id": annotation.id
         })
 
+        print("hi from sarva",files_output)
+
     return {
         "status": "assigned_for_review",
         "project_id": project_id,
         "reviewer_id": user_id,
         "assigned_files_count": len(files_output),
         "files": files_output
+    }
+
+
+
+
+
+
+
+
+
+# @router.get("/review/assign-random/{project_id}/{reviewer_id}")
+# def assign_random_review_file(
+#     project_id: str,
+#     reviewer_id: str,
+#     db: Session = Depends(get_db)
+# ):
+#     # 1. Validate reviewer
+#     reviewer = db.query(Users).filter(Users.id == reviewer_id).first()
+#     if not reviewer:
+#         print("no reviewer")
+#         raise HTTPException(status_code=404, detail="Reviewer not found.")
+
+#     # 2. Find all unassigned random review files for this project
+#     candidates = (
+#         db.query(Annotations)
+#         .join(Files, Files.id == Annotations.file_id)
+#         .filter(
+#             Files.project_id == project_id,
+#             Annotations.assigned_by == "random",
+#             Annotations.review_cycle == 0,
+#             Annotations.review_state == "not_reviewed"
+#         )
+#         .all()
+#     )
+
+#     if not candidates:
+#         print("no candidatess")
+#         raise HTTPException(
+#             status_code=404,
+#             detail="No unassigned random review files available."
+#         )
+
+#     # 3. Select a random candidate
+#     chosen = random.choice(candidates)
+#     file_obj = chosen.file
+
+#     # 4. Create a record in AnnotationReviews (assignment)
+#     review_entry = AnnotationReviews(
+#         annotation_id=chosen.id,
+#         reviewer_id=reviewer_id,
+#         decision=None,
+#         comments=None
+#     )
+
+#     db.add(review_entry)
+
+#     # 5. Update the annotation to mark it as "in review"
+#     chosen.review_cycle = 1
+#     chosen.review_state = "in_review"
+
+#     try:
+#         db.commit()
+#     except Exception as e:
+#         db.rollback()
+#         print("DB ERROR:", e)
+#         raise HTTPException(status_code=500, detail=str(e))
+
+    
+
+#     db.refresh(chosen)
+#     db.refresh(review_entry)
+
+#     # 6. Build S3 object URL
+#     bucket = "intern-vista-work-space"
+#     region = "eu-north-1"
+#     object_url = f"https://{bucket}.s3.{region}.amazonaws.com/{file_obj.s3_key}"
+
+#     # 7. Return response
+#     return {
+#         "status": "assigned_for_review",
+#         "project_id": project_id,
+#         "reviewer_id": reviewer_id,
+#         "file": {
+#             "file_id": file_obj.id,
+#             "annotation_id": chosen.id,
+#             "review_cycle": chosen.review_cycle,
+#             "review_state": chosen.review_state,
+#             "s3_key": file_obj.s3_key,
+#             "file_url": object_url,
+#         }
+#     }
+
+
+
+
+
+@router.get("/review/assign-random/{project_id}/{reviewer_id}")
+def assign_random_review_file(
+    project_id: str,
+    reviewer_id: str,
+    db: Session = Depends(get_db)
+):
+    # 1. Validate reviewer
+    reviewer = db.query(database_models.Users).filter(database_models.Users.id == reviewer_id).first()
+    if not reviewer:
+        print("Reviewer not found")
+        raise HTTPException(status_code=404, detail="Reviewer not found.")
+
+    # 2. Find candidates
+    candidates = (
+        db.query(database_models.Annotations)
+        .join(database_models.Files, database_models.Files.id == database_models.Annotations.file_id)
+        .filter(
+            database_models.Files.project_id == project_id,
+            database_models.Annotations.assigned_by == "random",
+            database_models.Annotations.review_cycle == 1,
+            database_models.Annotations.review_state == "not_reviewed"
+        )
+        .all()
+    )
+
+    if not candidates:
+        print("No candidate random review files")
+        raise HTTPException(status_code=404, detail="No unassigned random review files available.")
+
+    # 3. Random selection
+    chosen = random.choice(candidates)
+    file_obj = chosen.file
+
+    if not file_obj:
+        print("Annotation has no file mapped:", chosen.id)
+        raise HTTPException(status_code=500, detail="Broken annotation → file not found")
+
+    # 4. Create review entry
+    review_entry = database_models.AnnotationReviews(
+        annotation_id=chosen.id,
+        reviewer_id=reviewer_id,
+        decision=None,
+        comments=None
+    )
+
+    db.add(review_entry)
+
+    # 5. Update annotation
+    chosen.review_cycle = 1
+    chosen.review_state = "in_review"
+
+    # 6. Commit safely
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print("DB ERROR:", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+    db.refresh(chosen)
+    db.refresh(review_entry)
+
+    # Build S3 URL
+    bucket = "intern-vista-work-space"
+    region = "eu-north-1"
+    object_url = f"https://{bucket}.s3.{region}.amazonaws.com/{file_obj.s3_key}"
+
+    # 7. Return
+    return {
+        "status": "assigned_for_review",
+        "project_id": project_id,
+        "reviewer_id": reviewer_id,
+        "file": {
+            "file_id": file_obj.id,
+            "annotation_id": chosen.id,
+            "review_cycle": chosen.review_cycle,
+            "review_state": chosen.review_state,
+            "s3_key": file_obj.s3_key,
+            "object_url": object_url,
+        }
+    }
+
+
+@router.get("/review/unassigned/{project_id}")
+def get_unassigned_random_review_files(
+    project_id: str,
+    db: Session = Depends(get_db)
+):
+    # 1. Query all unassigned review files for this project
+    unassigned = (
+        db.query(database_models.Annotations)
+        .join(database_models.Files, database_models.Files.id == database_models.Annotations.file_id)
+        .filter(
+            database_models.Files.project_id == project_id,
+            database_models.Annotations.assigned_by == "random",
+            database_models.Annotations.review_cycle == 1,
+            database_models.Annotations.review_state == "not_reviewed"
+        )
+        .all()
+    )
+
+    # 2. If none found
+    if not unassigned:
+        return {
+            "project_id": project_id,
+            "count": 0,
+            "files": []
+        }
+
+    # 3. Build S3 URL for each file
+    bucket = "intern-vista-work-space"
+    region = "eu-north-1"
+
+    result_files = []
+    for annotation in unassigned:
+        file_obj = annotation.file
+        object_url = f"https://{bucket}.s3.{region}.amazonaws.com/{file_obj.s3_key}"
+
+        result_files.append({
+            "file_id": file_obj.id,
+            "annotation_id": annotation.id,
+            "s3_key": file_obj.s3_key,
+            "object_url": object_url,
+            "review_cycle": annotation.review_cycle,
+            "review_state": annotation.review_state,
+        })
+
+    # 4. Return list
+    return {
+        "project_id": project_id,
+        "count": len(result_files),
+        "files": result_files
     }
