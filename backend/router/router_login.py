@@ -54,3 +54,39 @@ async def login_user(request: Request, db: Session = Depends(get_db)):
     return {"access_token": token, "token_type": "bearer"}
 
 
+
+
+@router.get("/annotations/{file_id}")
+def get_annotations_by_file(file_id: int, db: Session = Depends(get_db)):
+    # Query matching annotations
+    annotations = (
+        db.query(database_models.Annotations)
+        .filter(database_models.Annotations.file_id == file_id)
+        .all()
+    )
+
+    if not annotations:
+        raise HTTPException(
+            status_code=404,
+            detail="No annotations found for this file"
+        )
+
+    # Build response dictionaries
+    response = []
+    for a in annotations:
+        response.append({
+            "id": a.id,
+            "file_id": a.file_id,
+            "user_id": a.user_id,
+            "data": a.data,
+            "assigned_by": a.assigned_by,
+            "assigned_at": a.assigned_at,
+            "last_saved_at": a.last_saved_at,
+            "submitted_at": a.submitted_at,
+            "review_state": a.review_state,
+            "review_cycle": a.review_cycle,
+            "belief": a.belief,
+            "rejection_description": a.rejection_description
+        })
+
+    return {"annotations": response}
