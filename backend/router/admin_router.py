@@ -515,6 +515,118 @@ def get_users_not_in_project(project_id: str, db: Session = Depends(get_db)):
 #for using this in the frontend, first show all the files in a particular project. 
 #side button allows the admin to assign the file to only one person at a time directs the admin to next page
 #in the next page it shows all the annotators and reviewers in the project # #they can select one person and assign the file to that person
+
+
+
+
+
+
+
+
+
+
+# @router.post("/annotation_table")
+# def assign_multiple_annotations(
+#     request: modelsp.AnnotationRequest,
+#     db: Session = Depends(get_db),
+#     s3_client=Depends(s3_connection.get_s3_connection)
+# ):
+#     """
+#     Assign multiple files to a single employee.
+#     request.file_ids -> list of file IDs
+#     request.user_id  -> employee (annotator) ID
+#     """
+#     try:
+#         assigned_annotations = []
+
+#         # Loop through each file in the list
+#         for file_id in request.file_ids:
+#             # Step 1: Check if this file is already assigned
+#             existing_annotation = db.execute(
+#                 select(database_models.Annotations).where(database_models.Annotations.file_id == file_id)
+#             ).scalar_one_or_none()
+
+#             if existing_annotation:
+#                 raise HTTPException(
+#                     status_code=400,
+#                     detail=f"File ID {file_id} is already assigned to User ID {existing_annotation.user_id}"
+#                 )
+
+#             # Step 2: Fetch the file record from DB
+#             file_record = db.query(database_models.Files).filter(database_models.Files.id == file_id).first()
+#             if not file_record:
+#                 raise HTTPException(status_code=404, detail=f"File ID {file_id} not found")
+
+#             # Step 2b: Fetch the project name from Project table using project_id
+#             project = db.query(database_models.Project).filter(database_models.Project.id == file_record.project_id).first()
+#             if not project:
+#                 raise HTTPException(status_code=404, detail=f"Project for File ID {file_id} not found")
+#             project_name = project.name
+
+#             # Step 3: Create new annotation entry
+#             new_annotation = database_models.Annotations(
+#                 file_id=file_id,
+#                 user_id=request.user_id,
+#                 assigned_at=datetime.now(timezone.ist),
+#                 data=None,
+#                 assigned_by='admin',
+#                 last_saved_at=datetime.now(timezone.ist),
+#                 submitted_at=None
+#             )
+#             db.add(new_annotation)
+
+#             # Step 4: Update file status to 'assigned'
+#             db.execute(
+#                 update(database_models.Files)
+#                 .where(database_models.Files.id == file_id)
+#                 .values(status="assigned")
+#             )
+
+#             # --- Step 5: Move file in S3 from raw → assigned ---
+#             filename = os.path.basename(file_record.s3_key)
+#             raw_key = f"annotation/{project_name}/working_directory/raw/{filename}"
+#             assigned_key = f"annotation/{project_name}/working_directory/assigned/{filename}"
+
+#             try:
+#                 # Check if raw file exists
+#                 s3_client.head_object(Bucket=BUCKET_NAME, Key=raw_key)
+
+#                 # Copy to assigned folder
+#                 s3_client.copy_object(
+#                     Bucket=BUCKET_NAME,
+#                     CopySource={'Bucket': BUCKET_NAME, 'Key': raw_key},
+#                     Key=assigned_key
+#                 )
+
+#                 # Delete from raw folder
+#                 s3_client.delete_object(Bucket=BUCKET_NAME, Key=raw_key)
+#                 print(f"✅ Moved S3 file {raw_key} → {assigned_key}")
+
+#             except ClientError as e:
+#                 if e.response['Error']['Code'] == '404':
+#                     raise HTTPException(status_code=404, detail=f"S3 file not found: {raw_key}")
+#                 else:
+#                     raise HTTPException(status_code=500, detail=f"Failed to move file in S3: {str(e)}")
+
+#             assigned_annotations.append(file_id)
+
+#         # Step 6: Commit transaction once after all assignments
+#         db.commit()
+
+#         return {
+#             "message": "Annotations created successfully",
+#             "total_assigned": len(assigned_annotations),
+#             "file_ids": assigned_annotations,
+#             "assigned_to": request.user_id
+#         }
+
+#     except Exception as e:
+#         db.rollback()
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
 @router.post("/annotation_table")
 def assign_multiple_annotations(
     request: modelsp.AnnotationRequest,
@@ -523,17 +635,17 @@ def assign_multiple_annotations(
 ):
     """
     Assign multiple files to a single employee.
-    request.file_ids -> list of file IDs
-    request.user_id  -> employee (annotator) ID
+    Moves S3 files from raw → assigned using stored full s3_key.
     """
     try:
         assigned_annotations = []
 
-        # Loop through each file in the list
         for file_id in request.file_ids:
-            # Step 1: Check if this file is already assigned
+
+            # --- Step 1: Check if annotation already exists ---
             existing_annotation = db.execute(
-                select(database_models.Annotations).where(database_models.Annotations.file_id == file_id)
+                select(database_models.Annotations)
+                .where(database_models.Annotations.file_id == file_id)
             ).scalar_one_or_none()
 
             if existing_annotation:
@@ -542,65 +654,80 @@ def assign_multiple_annotations(
                     detail=f"File ID {file_id} is already assigned to User ID {existing_annotation.user_id}"
                 )
 
-            # Step 2: Fetch the file record from DB
-            file_record = db.query(database_models.Files).filter(database_models.Files.id == file_id).first()
+            # --- Step 2: Fetch file record ---
+            file_record = (
+                db.query(database_models.Files)
+                .filter(database_models.Files.id == file_id)
+                .first()
+            )
+
             if not file_record:
                 raise HTTPException(status_code=404, detail=f"File ID {file_id} not found")
 
-            # Step 2b: Fetch the project name from Project table using project_id
-            project = db.query(database_models.Project).filter(database_models.Project.id == file_record.project_id).first()
-            if not project:
-                raise HTTPException(status_code=404, detail=f"Project for File ID {file_id} not found")
-            project_name = project.name
+            old_key = file_record.s3_key   # FULL path already stored
 
-            # Step 3: Create new annotation entry
+            # Validate raw folder
+            if "/working_directory/raw/" not in old_key:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"s3_key for File ID {file_id} is not in raw folder: {old_key}"
+                )
+
+            # --- Build new assigned key ---
+            new_key = old_key.replace("/working_directory/raw/", "/working_directory/assigned/")
+
+            # --- Step 3: Create new annotation record ---
             new_annotation = database_models.Annotations(
                 file_id=file_id,
                 user_id=request.user_id,
                 assigned_at=datetime.now(timezone.ist),
                 data=None,
-                assigned_by='admin',
+                assigned_by="admin",
                 last_saved_at=datetime.now(timezone.ist),
-                submitted_at=None
+                submitted_at=None,
             )
             db.add(new_annotation)
 
-            # Step 4: Update file status to 'assigned'
+            # --- Step 4: Update file status ---
             db.execute(
                 update(database_models.Files)
                 .where(database_models.Files.id == file_id)
                 .values(status="assigned")
             )
 
-            # --- Step 5: Move file in S3 from raw → assigned ---
-            filename = os.path.basename(file_record.s3_key)
-            raw_key = f"annotation/{project_name}/working_directory/raw/{filename}"
-            assigned_key = f"annotation/{project_name}/working_directory/assigned/{filename}"
-
+            # --- Step 5: MOVE file in S3 ---
             try:
-                # Check if raw file exists
-                s3_client.head_object(Bucket=BUCKET_NAME, Key=raw_key)
+                # Ensure source exists
+                s3_client.head_object(Bucket=BUCKET_NAME, Key=old_key)
 
-                # Copy to assigned folder
+                # COPY → assigned
                 s3_client.copy_object(
                     Bucket=BUCKET_NAME,
-                    CopySource={'Bucket': BUCKET_NAME, 'Key': raw_key},
-                    Key=assigned_key
+                    CopySource={"Bucket": BUCKET_NAME, "Key": old_key},
+                    Key=new_key
                 )
 
-                # Delete from raw folder
-                s3_client.delete_object(Bucket=BUCKET_NAME, Key=raw_key)
-                print(f"✅ Moved S3 file {raw_key} → {assigned_key}")
+                # DELETE → raw
+                s3_client.delete_object(Bucket=BUCKET_NAME, Key=old_key)
+
+                print(f"✅ S3 Move: {old_key} → {new_key}")
 
             except ClientError as e:
-                if e.response['Error']['Code'] == '404':
-                    raise HTTPException(status_code=404, detail=f"S3 file not found: {raw_key}")
+                if e.response["Error"]["Code"] == "404":
+                    raise HTTPException(status_code=404, detail=f"S3 file not found: {old_key}")
                 else:
-                    raise HTTPException(status_code=500, detail=f"Failed to move file in S3: {str(e)}")
+                    raise HTTPException(status_code=500, detail=f"S3 Move Error: {str(e)}")
+
+            # --- Step 6: Update DB with NEW key ---
+            db.execute(
+                update(database_models.Files)
+                .where(database_models.Files.id == file_id)
+                .values(s3_key=new_key)
+            )
 
             assigned_annotations.append(file_id)
 
-        # Step 6: Commit transaction once after all assignments
+        # Commit once after all operations
         db.commit()
 
         return {
@@ -613,6 +740,7 @@ def assign_multiple_annotations(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 
@@ -728,18 +856,76 @@ def remove_members(request: modelsp.DeleteMembersRequest, db: Session = Depends(
 
 ############################################################################reviewer##############################################################
 
+# @router.get("/project/{project_id}/unassigned-reviews")
+# def get_unassigned_review_files(
+#     project_id: str,
+#     db: Session = Depends(get_db)
+# ):
+#     # Fetch files that are in review and not yet reviewed
+#     results = (
+#         db.query(database_models.Files)
+#         .join(
+#             database_models.Annotations,
+#             database_models.Files.id == database_models.Annotations.file_id
+#         )
+#         .filter(
+#             database_models.Files.project_id == project_id,
+#             database_models.Files.status == "review",
+#             database_models.Annotations.review_state == "not_reviewed"
+#         )
+#         .all()
+#     )
+
+#     # Build actual S3 URL for each file
+#     file_urls = []
+#     for file in results:
+#         if not file.s3_key:
+#             continue  # skip invalid rows
+
+#         # file.s3_key only holds "abc123.png" — you must rebuild the full path
+#         # review files live inside: annotation/<project_name>/working_directory/review/<filename>
+
+#         project = (
+#             db.query(database_models.Project)
+#             .filter(database_models.Project.id == project_id)
+#             .first()
+#         )
+#         if not project:
+#             continue
+
+#         project_name = project.name
+
+#         # Construct full S3 path
+#         s3_key_full = f"annotation/{project_name}/working_directory/review/{file.s3_key}"
+
+#         # Construct public S3 URL
+#         file_url = (
+#             f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{s3_key_full}"
+#         )
+
+#         file_urls.append(file_url)
+
+#     return {
+#         "project_id": project_id,
+#         "count": len(file_urls),
+#         "unassigned_review_files": file_urls
+
+#     }
+
+
+
+
+
+
 @router.get("/project/{project_id}/unassigned-reviews")
 def get_unassigned_review_files(
     project_id: str,
     db: Session = Depends(get_db)
 ):
-    # Fetch files that are in review and not yet reviewed
+    # Fetch valid review files
     results = (
         db.query(database_models.Files)
-        .join(
-            database_models.Annotations,
-            database_models.Files.id == database_models.Annotations.file_id
-        )
+        .join(database_models.Annotations, database_models.Files.id == database_models.Annotations.file_id)
         .filter(
             database_models.Files.project_id == project_id,
             database_models.Files.status == "review",
@@ -748,34 +934,22 @@ def get_unassigned_review_files(
         .all()
     )
 
-    # Build actual S3 URL for each file
     file_urls = []
+
     for file in results:
         if not file.s3_key:
-            continue  # skip invalid rows
-
-        # file.s3_key only holds "abc123.png" — you must rebuild the full path
-        # review files live inside: annotation/<project_name>/working_directory/review/<filename>
-
-        project = (
-            db.query(database_models.Project)
-            .filter(database_models.Project.id == project_id)
-            .first()
-        )
-        if not project:
             continue
 
-        project_name = project.name
+        # NOW: s3_key is already FULL PATH
+        full_s3_key = file.s3_key  # DO NOT reconstruct anything
 
-        # Construct full S3 path
-        s3_key_full = f"annotation/{project_name}/working_directory/review/{file.s3_key}"
+        file_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{full_s3_key}"
 
-        # Construct public S3 URL
-        file_url = (
-            f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{s3_key_full}"
-        )
-
-        file_urls.append(file_url)
+        file_urls.append({
+            "file_id": file.id,
+            "filename": os.path.basename(full_s3_key),
+            "object_url": file_url
+        })
 
     return {
         "project_id": project_id,

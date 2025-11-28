@@ -148,7 +148,7 @@ class Annotations(Base):
         nullable=False
     )
     review_cycle = Column(Integer, default=0, nullable=False)
-    belief = Column(Boolean, default=True, nullable=False)
+    belief = Column(Boolean, default=False, nullable=False)
 
 
     file = relationship("Files", back_populates="annotations")
