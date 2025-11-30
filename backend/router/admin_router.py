@@ -35,7 +35,7 @@ BUCKET_NAME =  os.getenv("BUCKET_NAME")
 
 
 router = APIRouter(prefix="/api/admin", tags=["auth"])
-
+IST = timezone(timedelta(hours=5, minutes=30))
 
 
 @router.post("/upload-to-s3")
@@ -388,58 +388,136 @@ async def get_all_user(db: Session = Depends(get_db)):
     return users
 
 
+# @router.get("/projects/{project_id}/files")
+# def get_project_files(
+#     project_id: str,
+#     db: Session = Depends(get_db),
+#     s3_client=Depends(s3_connection.get_s3_connection)
+# ):
+#     """
+#     Given a project ID:
+#     1️⃣ Fetch project name from DB
+#     2️⃣ List files from S3 working and finished directories with subfolders
+#     3️⃣ Return signed URLs for all subfolders
+#     """
+
+#     BASE_PATH = "annotation/"
+
+#     # 1️⃣ Get project name from DB
+#     project = db.query(database_models.Project).filter(database_models.Project.id == project_id).first()
+#     if not project:
+#         raise HTTPException(status_code=404, detail="Project not found")
+
+#     project_name = project.name
+#     print(f"📁 Fetching files for project: {project_name}")
+
+#     # 2️⃣ Define subfolder prefixes
+#     working_prefixes = {
+#         "raw": f"{BASE_PATH}{project_name}/working_directory/raw/",
+#         "review": f"{BASE_PATH}{project_name}/working_directory/review/",
+#         "assigned": f"{BASE_PATH}{project_name}/working_directory/assigned/"
+#     }
+
+#     finished_prefixes = {
+#         "completed": f"{BASE_PATH}{project_name}/finished_directory/completed/"
+#     }
+
+#     # 3️⃣ List files and generate signed URLs for working subfolders
+#     working_urls = {}
+#     for folder_name, prefix in working_prefixes.items():
+#         files = admin_helper.list_files_in_s3(s3_client, prefix)
+#         working_urls[folder_name] = [admin_helper.get_presigned_url(s3_client, key) for key in files]
+
+#     # 4️⃣ List files and generate signed URLs for finished subfolders
+#     finished_urls = {}
+#     for folder_name, prefix in finished_prefixes.items():
+#         files = admin_helper.list_files_in_s3(s3_client, prefix)
+#         finished_urls[folder_name] = [admin_helper.get_presigned_url(s3_client, key) for key in files]
+
+#     # 5️⃣ Return structured response
+#     return {
+#         "project_name": project_name,
+#         "working_directory": working_urls,
+#         "finished_directory": finished_urls
+#     }
+
+
+
 @router.get("/projects/{project_id}/files")
 def get_project_files(
     project_id: str,
     db: Session = Depends(get_db),
     s3_client=Depends(s3_connection.get_s3_connection)
 ):
-    """
-    Given a project ID:
-    1️⃣ Fetch project name from DB
-    2️⃣ List files from S3 working and finished directories with subfolders
-    3️⃣ Return signed URLs for all subfolders
-    """
-
     BASE_PATH = "annotation/"
 
-    # 1️⃣ Get project name from DB
-    project = db.query(database_models.Project).filter(database_models.Project.id == project_id).first()
+    # 1️⃣ Validate project
+    project = (
+        db.query(database_models.Project)
+        .filter(database_models.Project.id == project_id)
+        .first()
+    )
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
     project_name = project.name
-    print(f"📁 Fetching files for project: {project_name}")
 
-    # 2️⃣ Define subfolder prefixes
+    # 2️⃣ Folder prefixes
     working_prefixes = {
         "raw": f"{BASE_PATH}{project_name}/working_directory/raw/",
         "review": f"{BASE_PATH}{project_name}/working_directory/review/",
-        "assigned": f"{BASE_PATH}{project_name}/working_directory/assigned/"
+        "assigned": f"{BASE_PATH}{project_name}/working_directory/assigned/",
     }
 
     finished_prefixes = {
         "completed": f"{BASE_PATH}{project_name}/finished_directory/completed/"
     }
 
-    # 3️⃣ List files and generate signed URLs for working subfolders
-    working_urls = {}
-    for folder_name, prefix in working_prefixes.items():
-        files = admin_helper.list_files_in_s3(s3_client, prefix)
-        working_urls[folder_name] = [admin_helper.get_presigned_url(s3_client, key) for key in files]
+    # 3️⃣ helper: turn s3 keys into structured objects
+    def build_file_objects(prefix):
+        keys = admin_helper.list_files_in_s3(s3_client, prefix)
+        result = []
 
-    # 4️⃣ List files and generate signed URLs for finished subfolders
-    finished_urls = {}
-    for folder_name, prefix in finished_prefixes.items():
-        files = admin_helper.list_files_in_s3(s3_client, prefix)
-        finished_urls[folder_name] = [admin_helper.get_presigned_url(s3_client, key) for key in files]
+        for key in keys:
+            filename = key.split("/")[-1]
+            url = admin_helper.get_presigned_url(s3_client, key)
 
-    # 5️⃣ Return structured response
+            # Lookup file record using s3_key
+            file_record = (
+                db.query(database_models.Files)
+                .filter(database_models.Files.s3_key == key)
+                .first()
+            )
+
+            result.append({
+                "file_id": file_record.id if file_record else None,
+                "filename": filename,
+                "s3_key": key,
+                "object_url": url,
+                "type": file_record.type if file_record else None,
+                "status": file_record.status if file_record else None,
+            })
+
+        return result
+
+    # 4️⃣ Build structured working and finished folders
+    working_directory = {
+        folder: build_file_objects(prefix)
+        for folder, prefix in working_prefixes.items()
+    }
+
+    finished_directory = {
+        folder: build_file_objects(prefix)
+        for folder, prefix in finished_prefixes.items()
+    }
+
+    # 5️⃣ Final response
     return {
         "project_name": project_name,
-        "working_directory": working_urls,
-        "finished_directory": finished_urls
+        "working_directory": working_directory,
+        "finished_directory": finished_directory
     }
+
 
 
 @router.get("/projects/{project_name}/task-counts")
@@ -638,6 +716,7 @@ def assign_multiple_annotations(
     Moves S3 files from raw → assigned using stored full s3_key.
     """
     try:
+        print("try")
         assigned_annotations = []
 
         for file_id in request.file_ids:
@@ -680,11 +759,13 @@ def assign_multiple_annotations(
             new_annotation = database_models.Annotations(
                 file_id=file_id,
                 user_id=request.user_id,
-                assigned_at=datetime.now(timezone.ist),
+                #assigned_at=datetime.now(timezone.ist),
                 data=None,
                 assigned_by="admin",
-                last_saved_at=datetime.now(timezone.ist),
+                #last_saved_at=datetime.now(timezone.ist),
                 submitted_at=None,
+                assigned_at=datetime.now(IST),
+                last_saved_at=datetime.now(IST)
             )
             db.add(new_annotation)
 
@@ -739,7 +820,11 @@ def assign_multiple_annotations(
 
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        print("🔥 INTERNAL ERROR:", repr(e))
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {repr(e)}")
+
 
 
 
@@ -917,14 +1002,59 @@ def remove_members(request: modelsp.DeleteMembersRequest, db: Session = Depends(
 
 
 
+# @router.get("/project/{project_id}/unassigned-reviews")
+# def get_unassigned_review_files(
+#     project_id: str,
+#     db: Session = Depends(get_db)
+# ):
+#     # Fetch valid review files
+#     results = (
+#         db.query(database_models.Files)
+#         .join(database_models.Annotations, database_models.Files.id == database_models.Annotations.file_id)
+#         .filter(
+#             database_models.Files.project_id == project_id,
+#             database_models.Files.status == "review",
+#             database_models.Annotations.review_state == "not_reviewed"
+#         )
+#         .all()
+#     )
+
+#     file_urls = []
+
+#     for file in results:
+#         if not file.s3_key:
+#             continue
+
+#         # NOW: s3_key is already FULL PATH
+#         full_s3_key = file.s3_key  # DO NOT reconstruct anything
+
+#         file_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{full_s3_key}"
+
+#         file_urls.append({
+#             "file_id": file.id,
+#             "filename": os.path.basename(full_s3_key),
+#             "object_url": file_url
+#         })
+
+#     return {
+#         "project_id": project_id,
+#         "count": len(file_urls),
+#         "unassigned_review_files": file_urls
+#     }
+
+
+
 @router.get("/project/{project_id}/unassigned-reviews")
 def get_unassigned_review_files(
     project_id: str,
     db: Session = Depends(get_db)
 ):
-    # Fetch valid review files
+    # Query both Files + Annotations
     results = (
-        db.query(database_models.Files)
+        db.query(
+            database_models.Files,
+            database_models.Annotations
+        )
         .join(database_models.Annotations, database_models.Files.id == database_models.Annotations.file_id)
         .filter(
             database_models.Files.project_id == project_id,
@@ -936,19 +1066,21 @@ def get_unassigned_review_files(
 
     file_urls = []
 
-    for file in results:
-        if not file.s3_key:
+    for file_record, annotation_record in results:
+
+        if not file_record.s3_key:
             continue
 
-        # NOW: s3_key is already FULL PATH
-        full_s3_key = file.s3_key  # DO NOT reconstruct anything
+        full_s3_key = file_record.s3_key
 
         file_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{full_s3_key}"
 
         file_urls.append({
-            "file_id": file.id,
+            "file_id": file_record.id,
             "filename": os.path.basename(full_s3_key),
-            "object_url": file_url
+            "object_url": file_url,
+            "assigned_by": annotation_record.assigned_by,   # ✅ added
+            "review_cycle": annotation_record.review_cycle  # (optional but useful)
         })
 
     return {
@@ -956,6 +1088,8 @@ def get_unassigned_review_files(
         "count": len(file_urls),
         "unassigned_review_files": file_urls
     }
+
+
 
 
 
@@ -1007,15 +1141,164 @@ def get_project_editors(project_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-# Endpoint to assign multiple files to reviewer
+# # Endpoint to assign multiple files to reviewer
+# @router.post("/reviews/link")
+# def link_multiple_annotations_to_reviewer(
+#     request: modelsp.AssignFileReviewer,
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Assign multiple files to a reviewer by linking each file's annotation
+#     to the reviewer in the annotation_reviews table.
+#     """
+
+#     try:
+#         if not request.file_ids:
+#             raise HTTPException(status_code=400, detail="file_ids list cannot be empty")
+
+#         created_links = []
+
+#         for file_id in request.file_ids:
+#             # Step 1️⃣: Find the annotation for each file_id
+#             annotation = (
+#                 db.query(database_models.Annotations)
+#                 .filter(database_models.Annotations.file_id == file_id)
+#                 .first()
+#             )
+
+#             if not annotation:
+#                 # Skip missing annotations, but continue for others
+#                 continue
+
+#             # Step 2️⃣: Check if this reviewer is already linked to this annotation
+#             existing_review = (
+#                 db.query(database_models.AnnotationReviews)
+#                 .filter(
+#                     database_models.AnnotationReviews.annotation_id == annotation.id,
+#                     database_models.AnnotationReviews.reviewer_id == request.reviewer_id
+#                 )
+#                 .first()
+#             )
+
+#             if existing_review:
+#                 # Avoid duplicate entries
+#                 continue
+
+#             # Step 3️⃣: Create new review entry
+#             new_review = database_models.AnnotationReviews(
+#                 annotation_id=annotation.id,
+#                 reviewer_id=request.reviewer_id
+#             )
+
+#             db.add(new_review)
+#             created_links.append({
+#                 "annotation_id": annotation.id,
+#                 "file_id": file_id
+#             })
+
+#         # Step 4️⃣: Commit all changes
+#         db.commit()
+
+#         if not created_links:
+#             raise HTTPException(status_code=400, detail="No new annotation links were created (may already exist or invalid file_ids)")
+
+#         return {
+#             "message": f"Successfully linked {len(created_links)} annotation(s) to reviewer {request.reviewer_id}",
+#             "created_links": created_links
+#         }
+
+#     except Exception as e:
+#         db.rollback()
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+# @router.post("/reviews/link")
+# def link_multiple_annotations_to_reviewer(
+#     request: modelsp.AssignFileReviewer,
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Assign multiple files to a reviewer.
+#     Creates AnnotationReviews entries AND updates annotation.review_state.
+#     """
+
+#     try:
+#         if not request.file_ids:
+#             raise HTTPException(status_code=400, detail="file_ids list cannot be empty")
+
+#         created_links = []
+
+#         for file_id in request.file_ids:
+
+#             # 1️⃣ Fetch annotation for the file
+#             annotation = (
+#                 db.query(database_models.Annotations)
+#                 .filter(database_models.Annotations.file_id == file_id)
+#                 .first()
+#             )
+
+#             if not annotation:
+#                 # Skip missing annotations but continue with others
+#                 continue
+
+#             # 2️⃣ Avoid duplicate review assignment
+#             existing_review = (
+#                 db.query(database_models.AnnotationReviews)
+#                 .filter(
+#                     database_models.AnnotationReviews.annotation_id == annotation.id,
+#                     database_models.AnnotationReviews.reviewer_id == request.reviewer_id
+#                 )
+#                 .first()
+#             )
+
+#             if existing_review:
+#                 # Skip if already linked
+#                 continue
+
+#             # 3️⃣ Create new reviewer assignment
+#             new_review = database_models.AnnotationReviews(
+#                 annotation_id=annotation.id,
+#                 reviewer_id=request.reviewer_id
+#             )
+#             db.add(new_review)
+
+#             # 4️⃣ Update annotation review state + cycle
+#             annotation.review_state = "in_review"
+#             annotation.review_cycle = (annotation.review_cycle or 0) + 1
+
+#             created_links.append({
+#                 "annotation_id": annotation.id,
+#                 "file_id": file_id
+#             })
+
+#         # 5️⃣ Save all changes
+#         db.commit()
+
+#         if not created_links:
+#             raise HTTPException(
+#                 status_code=400,
+#                 detail="No new annotation links were created (may already exist or invalid file_ids)"
+#             )
+
+#         return {
+#             "message": f"Successfully linked {len(created_links)} annotation(s) to reviewer {request.reviewer_id}",
+#             "created_links": created_links
+#         }
+
+#     except Exception as e:
+#         db.rollback()
+#         raise HTTPException(status_code=500, detail=str(e))
+
+    
+
 @router.post("/reviews/link")
 def link_multiple_annotations_to_reviewer(
     request: modelsp.AssignFileReviewer,
     db: Session = Depends(get_db)
 ):
     """
-    Assign multiple files to a reviewer by linking each file's annotation
-    to the reviewer in the annotation_reviews table.
+    Assign multiple files to a reviewer.
+    Creates AnnotationReviews entries AND updates annotation.review_state.
     """
 
     try:
@@ -1025,7 +1308,8 @@ def link_multiple_annotations_to_reviewer(
         created_links = []
 
         for file_id in request.file_ids:
-            # Step 1️⃣: Find the annotation for each file_id
+
+            # 1️⃣ Fetch annotation for the file
             annotation = (
                 db.query(database_models.Annotations)
                 .filter(database_models.Annotations.file_id == file_id)
@@ -1033,10 +1317,10 @@ def link_multiple_annotations_to_reviewer(
             )
 
             if not annotation:
-                # Skip missing annotations, but continue for others
+                # Skip missing annotations but continue with others
                 continue
 
-            # Step 2️⃣: Check if this reviewer is already linked to this annotation
+            # 2️⃣ Avoid duplicate review assignment
             existing_review = (
                 db.query(database_models.AnnotationReviews)
                 .filter(
@@ -1047,26 +1331,34 @@ def link_multiple_annotations_to_reviewer(
             )
 
             if existing_review:
-                # Avoid duplicate entries
+                # Skip if already linked
                 continue
 
-            # Step 3️⃣: Create new review entry
+            # 3️⃣ Create new reviewer assignment
             new_review = database_models.AnnotationReviews(
                 annotation_id=annotation.id,
-                reviewer_id=request.reviewer_id
+                reviewer_id=request.reviewer_id,
+                assigned_by="admin"
             )
-
             db.add(new_review)
+
+            # 4️⃣ Update annotation review state + cycle
+            annotation.review_state = "in_review"
+            # annotation.review_cycle = (annotation.review_cycle or 0) + 1
+
             created_links.append({
                 "annotation_id": annotation.id,
                 "file_id": file_id
             })
 
-        # Step 4️⃣: Commit all changes
+        # 5️⃣ Save all changes
         db.commit()
 
         if not created_links:
-            raise HTTPException(status_code=400, detail="No new annotation links were created (may already exist or invalid file_ids)")
+            raise HTTPException(
+                status_code=400,
+                detail="No new annotation links were created (may already exist or invalid file_ids)"
+            )
 
         return {
             "message": f"Successfully linked {len(created_links)} annotation(s) to reviewer {request.reviewer_id}",
@@ -1076,7 +1368,7 @@ def link_multiple_annotations_to_reviewer(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-    
+
 
 
 
