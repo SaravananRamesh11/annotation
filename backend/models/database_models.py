@@ -184,6 +184,8 @@ class AnnotationReviews(Base):
     # Timestamps
     reviewed_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    assigned_by = Column(Enum('admin', 'random', name="assigned_type"), nullable=False)
+
     # Relationship
     annotation = relationship("Annotations", back_populates="reviews")
     reviewer = relationship("Users", back_populates="reviews")

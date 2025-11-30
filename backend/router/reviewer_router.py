@@ -178,7 +178,7 @@ def accept_annotation(
 
     # Step 2: Approve annotation
     annotation.review_state = 'approved'
-    annotation.rejection_description=Null
+    annotation.rejection_description=None
     db.commit()
     db.refresh(annotation)
 
@@ -484,19 +484,82 @@ def reject_file(request: modelsp.RejectFileFromReview, db: Session = Depends(get
 
 
     
+# @router.get("/review-files/{project_id}/{user_id}")
+# def get_assigned_review_files(
+#     project_id: str,
+#     user_id: str,
+#     db: Session = Depends(get_db)
+# ):
+#     """
+#     Returns all files assigned to a reviewer (reviewer = user_id)
+#     where annotation.review_state = 'in_review'.
+#     Includes full S3 object URL and review cycle (to differentiate resubmissions).
+#     """
+
+#     # 1️⃣ Validate project
+#     project = (
+#         db.query(database_models.Project)
+#         .filter(database_models.Project.id == project_id)
+#         .first()
+#     )
+#     if not project:
+#         raise HTTPException(status_code=404, detail="Project not found")
+
+#     # 2️⃣ Fetch all files assigned to reviewer for review
+#     assigned_files = (
+#         db.query(database_models.Files, database_models.Annotations)
+#         .join(database_models.Annotations, database_models.Annotations.file_id == database_models.Files.id)
+#         .join(database_models.AnnotationReviews, database_models.AnnotationReviews.annotation_id == database_models.Annotations.id)
+#         .filter(
+#             database_models.Files.project_id == project_id,
+#             database_models.AnnotationReviews.reviewer_id == user_id,
+#             database_models.Annotations.review_state == 'in_review'
+#         )
+#         .all()
+#     )
+
+#     if not assigned_files:
+#         return []
+
+#     files_output = []
+
+#     for file_obj, annotation in assigned_files:
+#         s3_key = file_obj.s3_key  # already full path
+
+#         object_url = f"https://{BUCKET_NAME}.s3.eu-north-1.amazonaws.com/{s3_key}"
+
+#         files_output.append({
+#             "file_id": file_obj.id,
+#             "assigned_by_annotation":annotation.assigned_by,
+#             "filename": os.path.basename(s3_key),
+#             "file_type": file_obj.type,
+#             "status": file_obj.status,
+#             "s3_key": s3_key,
+#             "object_url": object_url,
+#             "review_cycle": annotation.review_cycle,  # include cycle
+#             "annotation_id": annotation.id
+#         })
+
+#         print("hi from sarva",files_output)
+
+#     return {
+#         "status": "assigned_for_review",
+#         "project_id": project_id,
+#         "reviewer_id": user_id,
+#         "assigned_files_count": len(files_output),
+#         "files": files_output
+#     }
+
+
+
+
 @router.get("/review-files/{project_id}/{user_id}")
 def get_assigned_review_files(
     project_id: str,
     user_id: str,
     db: Session = Depends(get_db)
 ):
-    """
-    Returns all files assigned to a reviewer (reviewer = user_id)
-    where annotation.review_state = 'in_review'.
-    Includes full S3 object URL and review cycle (to differentiate resubmissions).
-    """
-
-    # 1️⃣ Validate project
+    # Validate project
     project = (
         db.query(database_models.Project)
         .filter(database_models.Project.id == project_id)
@@ -505,42 +568,59 @@ def get_assigned_review_files(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # 2️⃣ Fetch all files assigned to reviewer for review
+    # Fetch files + annotation + annotation_review
     assigned_files = (
-        db.query(database_models.Files, database_models.Annotations)
-        .join(database_models.Annotations, database_models.Annotations.file_id == database_models.Files.id)
-        .join(database_models.AnnotationReviews, database_models.AnnotationReviews.annotation_id == database_models.Annotations.id)
+        db.query(
+            database_models.Files,
+            database_models.Annotations,
+            database_models.AnnotationReviews
+        )
+        .join(
+            database_models.Annotations,
+            database_models.Annotations.file_id == database_models.Files.id
+        )
+        .join(
+            database_models.AnnotationReviews,
+            database_models.AnnotationReviews.annotation_id == database_models.Annotations.id
+        )
         .filter(
             database_models.Files.project_id == project_id,
             database_models.AnnotationReviews.reviewer_id == user_id,
-            database_models.Annotations.review_state == 'in_review'
+            database_models.Annotations.review_state == "in_review"
         )
         .all()
     )
 
     if not assigned_files:
-        return []
+        return {
+            "status": "assigned_for_review",
+            "project_id": project_id,
+            "reviewer_id": user_id,
+            "assigned_files_count": 0,
+            "files": []
+        }
 
     files_output = []
 
-    for file_obj, annotation in assigned_files:
-        s3_key = file_obj.s3_key  # already full path
+    for file_obj, annotation, annotation_review in assigned_files:
+        s3_key = file_obj.s3_key
 
-        object_url = f"https://{BUCKET_NAME}.s3.eu-north-1.amazonaws.com/{s3_key}"
+        object_url = (
+            f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
+        )
 
         files_output.append({
             "file_id": file_obj.id,
-            "assigned_by":annotation.assigned_by,
+            "assigned_by_annotation": annotation.assigned_by,     # old
+            "assigned_by_review": annotation_review.assigned_by,  # NEW
             "filename": os.path.basename(s3_key),
             "file_type": file_obj.type,
             "status": file_obj.status,
             "s3_key": s3_key,
             "object_url": object_url,
-            "review_cycle": annotation.review_cycle,  # include cycle
+            "review_cycle": annotation.review_cycle,
             "annotation_id": annotation.id
         })
-
-        print("hi from sarva",files_output)
 
     return {
         "status": "assigned_for_review",
@@ -662,7 +742,7 @@ def assign_random_review_file(
         .join(database_models.Files, database_models.Files.id == database_models.Annotations.file_id)
         .filter(
             database_models.Files.project_id == project_id,
-            database_models.Annotations.assigned_by == "random",
+            #database_models.Annotations.assigned_by == "random",
             database_models.Annotations.review_cycle == 1,
             database_models.Annotations.review_state == "not_reviewed"
         )
@@ -686,7 +766,8 @@ def assign_random_review_file(
         annotation_id=chosen.id,
         reviewer_id=reviewer_id,
         decision=None,
-        comments=None
+        comments=None,
+        assigned_by="random"
     )
 
     db.add(review_entry)
