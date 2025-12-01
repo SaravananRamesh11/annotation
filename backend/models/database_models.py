@@ -149,7 +149,7 @@ class Annotations(Base):
     )
     review_cycle = Column(Integer, default=0, nullable=False)
     belief = Column(Boolean, default=False, nullable=False)
-    rejection_description=Column(String, nullable=True)
+    rejection_description=Column(JSONB, nullable=True)
 
 
     file = relationship("Files", back_populates="annotations")

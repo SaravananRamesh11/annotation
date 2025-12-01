@@ -937,3 +937,29 @@ def get_rejected_files(employee_id: str, project_id: str, db: Session = Depends(
         "rejected_files_count": len(files_data),
         "files": files_data
     }
+
+
+@router.get("/rejection/{file_id}")
+def get_rejection_description(file_id: int, db: Session = Depends(get_db)):
+    """
+    Return the rejection_description JSON array for a given file_id.
+    """
+
+    annotation = (
+        db.query(database_models.Annotations)
+        .filter(database_models.Annotations.file_id == file_id)
+        .first()
+    )
+
+    if not annotation:
+        raise HTTPException(status_code=404, detail="Annotation not found for this file.")
+    # if annotation.rejection_description==None:
+    #     return{
+
+    #     }
+
+
+    return {
+        "file_id": file_id,
+        "rejection_description": annotation.rejection_description or []
+    }
