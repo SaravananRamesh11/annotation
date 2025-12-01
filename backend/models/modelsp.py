@@ -107,11 +107,17 @@ class SubmitFileToReview(BaseModel):
     file_id: int
     user_id: str
 
+
+class RejectionEntry(BaseModel):
+    submitted_at: datetime
+    description: str
+
 class RejectFileFromReview(BaseModel):
     project_id: str
     file_id: int
     reviewer_id: str
-    rejection_description:str
+    rejection_description:RejectionEntry
+
 
 
 class AssignFileReviewer(BaseModel):

@@ -1,7 +1,7 @@
 from sqlalchemy.sql.elements import Null
-import traceback
+import traceback     
 from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form,Query
-from sqlalchemy import and_, func, select, update,delete,exists,not_
+from sqlalchemy import and_, func, select, update,delete,exists,not_,cast
 from sqlalchemy.orm import Session,aliased
 from database import get_db
 from sqlalchemy.dialects.postgresql import JSONB
@@ -362,12 +362,66 @@ def accept_annotation(
 
 
 
+# @router.put("/reject")
+# def reject_file(request: modelsp.RejectFileFromReview, db: Session = Depends(get_db)):
+#     """
+#     Reject a file under review.
+#     Marks review_state='rejected', sets belief=False,
+#     updates AnnotationReviews.decision='rejected', and keeps file.status='review'.
+#     """
+
+#     annotation = (
+#         db.query(database_models.Annotations)
+#         .join(database_models.Files)
+#         .filter(
+#             database_models.Files.id == request.file_id,
+#             database_models.Files.project_id == request.project_id,
+#             database_models.Annotations.file_id == request.file_id,
+#         )
+#         .first()
+#     )
+
+#     if not annotation:
+#         raise HTTPException(status_code=404, detail="Annotation not found for this file.")
+
+#     if annotation.review_state != 'in_review':
+#         raise HTTPException(status_code=400, detail="File not currently under review.")
+
+#     # ❌ Remove increment here — do NOT increase review_cycle
+#     annotation.belief = False
+#     annotation.review_state = 'rejected'
+#     annotation.submitted_at = datetime.utcnow()
+#     annotation.rejection_description=request.rejection_description
+
+#     file = db.query(database_models.Files).filter(database_models.Files.id == request.file_id).first()
+#     if file:
+#         file.status = 'review'
+
+#     review_record = (
+#         db.query(database_models.AnnotationReviews)
+#         .filter(database_models.AnnotationReviews.annotation_id == annotation.id)
+#         .first()
+#     )
+#     if review_record:
+#         review_record.decision = 'rejected'
+#         review_record.reviewed_at = datetime.utcnow()
+
+#     db.commit()
+
+#     return {
+#         "message": "File rejected successfully.",
+#         "file_id": request.file_id,
+#         "review_cycle": annotation.review_cycle,
+#         "belief": annotation.belief,
+#         "review_state": annotation.review_state,
+#     }
+
 @router.put("/reject")
 def reject_file(request: modelsp.RejectFileFromReview, db: Session = Depends(get_db)):
     """
     Reject a file under review.
-    Marks review_state='rejected', sets belief=False,
-    updates AnnotationReviews.decision='rejected', and keeps file.status='review'.
+    Appends a rejection entry into rejection_description (JSONB array),
+    sets review_state='rejected', belief=False, and updates review record.
     """
 
     annotation = (
@@ -387,23 +441,50 @@ def reject_file(request: modelsp.RejectFileFromReview, db: Session = Depends(get
     if annotation.review_state != 'in_review':
         raise HTTPException(status_code=400, detail="File not currently under review.")
 
-    # ❌ Remove increment here — do NOT increase review_cycle
+    # Convert Pydantic model → dict (THIS FIXES YOUR ERROR)
+    new_rejection = request.rejection_description.model_dump()
+    if isinstance(new_rejection["submitted_at"], datetime):
+        new_rejection["submitted_at"] = new_rejection["submitted_at"].isoformat()
+
+    # If rejection_description is empty, initialize it
+    if annotation.rejection_description is None:
+        annotation.rejection_description = [new_rejection]
+    else:
+        # Append using PostgreSQL JSONB concatenation
+        from sqlalchemy import cast
+        from sqlalchemy.dialects.postgresql import JSONB
+
+        db.execute(
+            database_models.Annotations.__table__.update()
+            .where(database_models.Annotations.id == annotation.id)
+            .values(
+                rejection_description=
+                    database_models.Annotations.rejection_description.op("||")(
+                        cast([new_rejection], JSONB)
+                    )
+            )
+        )
+
+    # Update core annotation fields
     annotation.belief = False
-    annotation.review_state = 'rejected'
+    annotation.review_state = "rejected"
     annotation.submitted_at = datetime.utcnow()
-    annotation.rejection_description=request.rejection_description
 
-    file = db.query(database_models.Files).filter(database_models.Files.id == request.file_id).first()
+    # Update file state
+    file = db.query(database_models.Files).filter(
+        database_models.Files.id == request.file_id
+    ).first()
     if file:
-        file.status = 'review'
+        file.status = "review"
 
+    # Update review record
     review_record = (
         db.query(database_models.AnnotationReviews)
         .filter(database_models.AnnotationReviews.annotation_id == annotation.id)
         .first()
     )
     if review_record:
-        review_record.decision = 'rejected'
+        review_record.decision = "rejected"
         review_record.reviewed_at = datetime.utcnow()
 
     db.commit()
@@ -411,10 +492,11 @@ def reject_file(request: modelsp.RejectFileFromReview, db: Session = Depends(get
     return {
         "message": "File rejected successfully.",
         "file_id": request.file_id,
-        "review_cycle": annotation.review_cycle,
-        "belief": annotation.belief,
         "review_state": annotation.review_state,
+        "rejection_appended": new_rejection,
     }
+
+
 
 
 
