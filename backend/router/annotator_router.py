@@ -3,7 +3,7 @@ import os
 import random
 from sqlalchemy.exc import SQLAlchemyError
 import traceback
-from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form,Query
+from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form,Query,Body
 from botocore.exceptions import NoCredentialsError,ClientError
 from sqlalchemy.orm import Session
 from helper_functions import admin_helper
@@ -524,15 +524,53 @@ def get_user_assigned_files(
 
 
 
-# Endpoint to save annotation data for a file
+# # Endpoint to save annotation data for a file
+# @router.put("/save_annotation/{file_id}")
+# async def save_annotation(
+#     file_id: int,
+#     request: modelsp.SaveAnnotationData,
+#     db: Session = Depends(get_db)
+# ):
+#     try:
+#         # Step 1: Find the annotation record with the given file_id
+#         annotation_record = db.query(database_models.Annotations).filter(
+#             database_models.Annotations.file_id == file_id
+#         ).first()
+
+#         if not annotation_record:
+#             raise HTTPException(status_code=404, detail="Record not found for given file_id")
+
+#         # Step 2: Convert Pydantic models to dict and update data + timestamp
+#         annotation_record.data = [bbox.dict() for bbox in request.data]
+#         annotation_record.last_saved_at = datetime.now(timezone.utc)
+
+#         # Step 3: Commit changes
+#         db.commit()
+#         db.refresh(annotation_record)
+
+#         return {
+#             "message": "Annotation data saved successfully",
+#             "last_saved_at": annotation_record.last_saved_at
+#         }
+
+#     except HTTPException:
+#         # Re-raise FastAPI HTTPExceptions (like 404)
+#         raise
+#     except Exception as e:
+#         db.rollback()
+#         print("Error saving annotation:", e)
+#         raise HTTPException(status_code=500, detail=f"Error saving annotation data: {str(e)}")
+
+
+
 @router.put("/save_annotation/{file_id}")
 async def save_annotation(
     file_id: int,
-    request: modelsp.SaveAnnotationData,
+    request: dict = Body(...),     # <= accept ANY JSON object
     db: Session = Depends(get_db)
 ):
     try:
-        # Step 1: Find the annotation record with the given file_id
+        # Step 1: Fetch row for this file_id
         annotation_record = db.query(database_models.Annotations).filter(
             database_models.Annotations.file_id == file_id
         ).first()
@@ -540,11 +578,11 @@ async def save_annotation(
         if not annotation_record:
             raise HTTPException(status_code=404, detail="Record not found for given file_id")
 
-        # Step 2: Convert Pydantic models to dict and update data + timestamp
-        annotation_record.data = [bbox.dict() for bbox in request.data]
+        # Step 2: Save raw data (supports all shapes: rectangle, polygon, polyline, etc.)
+        annotation_record.data = request.get("data", [])   # <-- keep array as-is
         annotation_record.last_saved_at = datetime.now(timezone.utc)
 
-        # Step 3: Commit changes
+        # Step 3: Commit
         db.commit()
         db.refresh(annotation_record)
 
@@ -553,13 +591,12 @@ async def save_annotation(
             "last_saved_at": annotation_record.last_saved_at
         }
 
-    except HTTPException:
-        # Re-raise FastAPI HTTPExceptions (like 404)
-        raise
     except Exception as e:
         db.rollback()
         print("Error saving annotation:", e)
         raise HTTPException(status_code=500, detail=f"Error saving annotation data: {str(e)}")
+
+
 
 # Endpoint to get the saved annotation data for a file   
 @router.get("/file/{file_id}/data")

@@ -85,16 +85,16 @@ class AnnotationRequest(BaseModel):
 class ProjectRequest(BaseModel):
     project_id: int
 
-class BoundingBox(BaseModel):
-    id: str
-    x: float
-    y: float
-    width: float
-    height: float
-    classes: Dict[str, Any] 
+# class BoundingBox(BaseModel):
+#     id: str
+#     x: float
+#     y: float
+#     width: float
+#     height: float
+#     classes: Dict[str, Any] 
 
-class SaveAnnotationData(BaseModel):
-    data: List[BoundingBox]
+# class SaveAnnotationData(BaseModel):
+#     data: List[BoundingBox]
 
 
 class AssingnReviewFileRequest(BaseModel):

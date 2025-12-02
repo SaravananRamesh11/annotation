@@ -865,7 +865,7 @@ def promote_multiple_annotators_to_editors(project_id: str, request: modelsp.Pro
             database_models.ProjectMember.project_id == project_id,
             database_models.ProjectMember.user_id.in_(request.user_ids),
             database_models.ProjectMember.project_role == "annotator"
-        ).update({database_models.ProjectMember.project_role: "editor"}, synchronize_session=False)
+        ).update({database_models.ProjectMember.project_role: "reviewer"}, synchronize_session=False)
 
         if updated_count == 0:
             raise HTTPException(status_code=404, detail="No matching annotators found to update")
