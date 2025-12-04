@@ -1,4 +1,6 @@
 import traceback
+import zipfile
+import dicttoxml
 from fastapi import APIRouter, Request, Depends, HTTPException, status,File, UploadFile, Form,Query
 from sqlalchemy import and_, func, select, update,delete,exists,not_
 from sqlalchemy.orm import Session,aliased
@@ -12,10 +14,14 @@ from models import modelsp,database_models
 from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 import bcrypt
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse,StreamingResponse
 import pandas as pd
 from helper_functions import admin_helper
 from sqlalchemy.exc import SQLAlchemyError
+from io import StringIO
+import csv
+import json
+
 
 
 
@@ -1455,3 +1461,190 @@ def project_name(projectId:str,db: Session = Depends(get_db)):
       .scalar()
             )
     return project_name
+
+
+
+
+
+
+
+
+
+@router.get("/project/{project_id}/csv")
+def export_project_csv(project_id: str, db: Session = Depends(get_db)):
+    # Query
+    results = (
+        db.query(
+            database_models.Files.id.label("file_id"),
+            database_models.Files.project_id,
+            database_models.Files.s3_key,
+            database_models.Files.type,
+            database_models.Files.status,
+            database_models.Files.created_at.label("file_created_at"),
+            database_models.Files.updated_at.label("file_updated_at"),
+
+            database_models.Annotations.id.label("annotation_id"),
+            database_models.Annotations.user_id,
+            database_models.Annotations.data,
+            database_models.Annotations.assigned_by,
+            database_models.Annotations.assigned_at,
+            database_models.Annotations.last_saved_at,
+            database_models.Annotations.submitted_at,
+            database_models.Annotations.review_state,
+            database_models.Annotations.review_cycle,
+            database_models.Annotations.belief,
+            database_models.Annotations.rejection_description
+        )
+        .outerjoin(database_models.Annotations, database_models.Annotations.file_id == database_models.Files.id)
+        .filter(database_models.Files.project_id == project_id)
+        .all()
+    )
+
+    if not results:
+        raise HTTPException(status_code=404, detail="No data found for this project")
+
+    # CSV Output Buffer
+    output = StringIO()
+    writer = csv.writer(output)
+
+    # Header
+    writer.writerow([
+        "file_id", "project_id", "s3_key", "type", "status",
+        "file_created_at", "file_updated_at",
+        "annotation_id", "user_id", "data", "assigned_by",
+        "assigned_at", "last_saved_at", "submitted_at",
+        "review_state", "review_cycle", "belief",
+        "rejection_description"
+    ])
+
+    # Rows
+    for row in results:
+        writer.writerow([
+            row.file_id,
+            row.project_id,
+            row.s3_key,
+            row.type,
+            row.status,
+            row.file_created_at,
+            row.file_updated_at,
+
+            row.annotation_id,
+            row.user_id,
+
+            json.dumps(row.data) if row.data else None,
+            row.assigned_by,
+            row.assigned_at,
+            row.last_saved_at,
+            row.submitted_at,
+            row.review_state,
+            row.review_cycle,
+            row.belief,
+            json.dumps(row.rejection_description) if row.rejection_description else None,
+        ])
+
+    output.seek(0)
+
+    return StreamingResponse(
+        output,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=project_{project_id}.csv"
+        }
+    )
+
+
+
+@router.get("/download-folder/{project_name}")
+def download_folder_as_zip(project_name: str,s3_client=Depends(s3_connection.get_s3_connection),db: Session = Depends(get_db)):
+    prefix = f"annotation/{project_name}/labels/"
+
+    # 1. List all files
+    objects = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix=prefix)
+
+    if "Contents" not in objects:
+        raise HTTPException(status_code=404, detail="No files found in given folder")
+
+    # 2. Create in-memory ZIP file
+    zip_buffer = io.BytesIO()
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for obj in objects["Contents"]:
+            key = obj["Key"]
+
+            if key.endswith("/"):  # skip folder placeholder
+                continue
+
+            # Download file content
+            file_stream = s3_client.get_object(Bucket=BUCKET_NAME, Key=key)["Body"].read()
+
+            # Write into ZIP (keep folder structure inside zip optional)
+            file_name = key.split(prefix)[-1]
+            zip_file.writestr(file_name, file_stream)
+
+    zip_buffer.seek(0)
+
+    # 3. Stream ZIP file to client
+    zip_filename = f"{project_name}_labels.zip"
+
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{zip_filename}"'
+        },
+    )
+
+
+
+@router.get("/download-xml/{project_name}")
+def download_xml_zip(project_name: str,s3_client=Depends(s3_connection.get_s3_connection),db: Session = Depends(get_db)):
+    prefix = f"annotation/{project_name}/labels/"
+
+    # 1. List folder contents
+    response = s3_client.list_objects_v2(Bucket=BUCKET_NAME, Prefix=prefix)
+
+    if "Contents" not in response:
+        raise HTTPException(status_code=404, detail="No files found in folder")
+
+    # 2. Prepare ZIP in memory
+    zip_buffer = io.BytesIO()
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for obj in response["Contents"]:
+            key = obj["Key"]
+
+            # Skip S3 "folder"
+            if key.endswith("/"):
+                continue
+
+            # Only process .json files
+            if not key.lower().endswith(".json"):
+                continue
+
+            # Download JSON file
+            json_bytes = s3_client.get_object(Bucket=BUCKET_NAME, Key=key)["Body"].read()
+
+            try:
+                json_data = json.loads(json_bytes)
+            except Exception:
+                continue  # skip malformed json
+
+            # Convert JSON → XML
+            xml_data = dicttoxml.dicttoxml(json_data, custom_root="root", attr_type=False)
+
+            # Clean filename
+            file_name = key.split(prefix)[-1].replace(".json", ".xml")
+
+            # Add XML file into ZIP
+            zf.writestr(file_name, xml_data)
+
+    zip_buffer.seek(0)
+
+    # 3. Stream ZIP file
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{project_name}_xml_files.zip"'
+        },
+    )
