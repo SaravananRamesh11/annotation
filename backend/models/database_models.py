@@ -46,9 +46,11 @@ class Project(Base):
     name = Column(String(100), nullable=False)
     description = Column(String(300), nullable=True)
     classes = Column(JSONB, nullable=False)
+    instruction_url=Column(String, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
 
     members = relationship(
         "ProjectMember",
@@ -75,6 +77,7 @@ class Users(Base):
     password = Column(String, nullable=False)
     otp = Column(String, nullable=True)
     otpExpiry = Column(DateTime, nullable=True)
+    
 
     project_links = relationship("ProjectMember", back_populates="user")
     annotations = relationship("Annotations", back_populates="user")
