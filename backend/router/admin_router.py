@@ -37,100 +37,225 @@ router = APIRouter(prefix="/api/admin", tags=["auth"])
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
+# @router.post("/upload-to-s3")
+# async def upload_files_to_s3(
+#     id: str = Form(...),
+#     project_name: str = Form(...),
+#     proofImages: List[UploadFile] = File(...),
+#     s3_client=Depends(s3_connection.get_s3_connection),
+#     db: Session = Depends(get_db)
+# ):
+#     uploaded_files = []
+
+#     try:
+#         print("🟢 Received form fields:")
+#         print(f"id={id}")
+#         print(f"project_name={project_name}")
+#         print(f"proofImages count={len(proofImages)}")
+
+#         # --- Create directory structure for the project ---
+#         instruction_dir=f"annotation/{project_name}/instruction/"
+#         label_dir = f"annotation/{project_name}/labels/"
+#         working_raw_dir = f"annotation/{project_name}/working_directory/raw/"
+#         working_assigned_dir = f"annotation/{project_name}/working_directory/assigned/"
+#         working_review_dir = f"annotation/{project_name}/working_directory/review/"
+#         finished_completed_dir = f"annotation/{project_name}/finished_directory/completed/"
+
+#         # Create S3 "folders" (prefixes)
+#         s3_client.put_object(Bucket=BUCKET_NAME, Key=label_dir)
+#         s3_client.put_object(Bucket=BUCKET_NAME, Key=working_raw_dir)
+#         s3_client.put_object(Bucket=BUCKET_NAME, Key=working_assigned_dir)
+#         s3_client.put_object(Bucket=BUCKET_NAME, Key=working_review_dir)
+#         s3_client.put_object(Bucket=BUCKET_NAME, Key=finished_completed_dir)
+#         s3_client.put_object(Bucket=BUCKET_NAME, Key=instruction_dir)
+
+#         print("✅ Created directory structure:")
+#         print(f"  - {label_dir}")
+#         print(f"  - {working_raw_dir}")
+#         print(f"  - {working_assigned_dir}")
+#         print(f"  - {working_review_dir}")
+#         print(f"  - {finished_completed_dir}")
+#         print(f"  - {instruction_dir}")
+
+
+#         # --- Get project_id from project_name ---
+#         project = db.query(database_models.Project).filter(database_models.Project.name == project_name).first()
+#         if not project:
+#             raise HTTPException(status_code=404, detail=f"Project '{project_name}' not found")
+        
+#         project_id = project.id
+#         print(f"📁 Found project: {project_name} (ID: {project_id})")
+
+#         # --- Upload files to working_directory/raw/ and save to database ---
+#         for file in proofImages:
+#             if not file.filename:
+#                 continue
+
+#             file_extension = os.path.splitext(file.filename)[1]
+#             unique_name = f"{uuid.uuid4().hex}{file_extension}"
+
+#             s3_keyy = f"annotation/{project_name}/working_directory/raw/{unique_name}"
+
+
+#             file.file.seek(0)
+#             s3_client.upload_fileobj(
+#                 file.file,
+#                 BUCKET_NAME,
+#                 s3_keyy,
+#                 ExtraArgs={'ContentType': file.content_type}
+#             )
+
+#             # --- Create Files record in database ---
+#             try:
+#                 new_file = database_models.Files(
+#                     project_id=project_id,
+#                     s3_key=s3_keyy,  # Store only the hexadecimal filename
+#                     type='image',
+#                     status='pending'
+#                 )
+                
+#                 db.add(new_file)
+#                 db.commit()
+#                 db.refresh(new_file)
+                
+#                 print(f"💾 Saved file record: ID={new_file.id}, s3_key={s3_keyy}")
+                
+#             except Exception as db_error:
+#                 db.rollback()
+#                 print(f"❌ Database error for file {unique_name}: {str(db_error)}")
+#                 # Continue with other files even if one fails
+#                 continue
+
+#             file_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{s3_keyy}"
+#             uploaded_files.append(file_url)
+
+#         return {
+#             "message": "Files uploaded successfully!",
+#             "ticket_id": id,
+#             "project_name": project_name,
+#             "project_id": project_id,
+#             "files_uploaded": len(uploaded_files),
+#             "file_urls": uploaded_files,
+#         }
+
+#     except NoCredentialsError:
+#         raise HTTPException(status_code=403, detail="AWS credentials not found")
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+
 @router.post("/upload-to-s3")
 async def upload_files_to_s3(
     id: str = Form(...),
     project_name: str = Form(...),
     proofImages: List[UploadFile] = File(...),
+    instructionFile: Optional[UploadFile] = File(None),
     s3_client=Depends(s3_connection.get_s3_connection),
     db: Session = Depends(get_db)
 ):
     uploaded_files = []
+    instruction_file_url = None
 
     try:
-        print("🟢 Received form fields:")
-        print(f"id={id}")
-        print(f"project_name={project_name}")
-        print(f"proofImages count={len(proofImages)}")
-
-        # --- Create directory structure for the project ---
+        # -------------------------------
+        # Create S3 directory structure
+        # -------------------------------
+        instruction_dir = f"annotation/{project_name}/instruction/"
         label_dir = f"annotation/{project_name}/labels/"
         working_raw_dir = f"annotation/{project_name}/working_directory/raw/"
         working_assigned_dir = f"annotation/{project_name}/working_directory/assigned/"
         working_review_dir = f"annotation/{project_name}/working_directory/review/"
         finished_completed_dir = f"annotation/{project_name}/finished_directory/completed/"
 
-        # Create S3 "folders" (prefixes)
-        s3_client.put_object(Bucket=BUCKET_NAME, Key=label_dir)
-        s3_client.put_object(Bucket=BUCKET_NAME, Key=working_raw_dir)
-        s3_client.put_object(Bucket=BUCKET_NAME, Key=working_assigned_dir)
-        s3_client.put_object(Bucket=BUCKET_NAME, Key=working_review_dir)
-        s3_client.put_object(Bucket=BUCKET_NAME, Key=finished_completed_dir)
+        for prefix in [
+            instruction_dir,
+            label_dir,
+            working_raw_dir,
+            working_assigned_dir,
+            working_review_dir,
+            finished_completed_dir,
+        ]:
+            s3_client.put_object(Bucket=BUCKET_NAME, Key=prefix)
 
-        print("✅ Created directory structure:")
-        print(f"  - {label_dir}")
-        print(f"  - {working_raw_dir}")
-        print(f"  - {working_assigned_dir}")
-        print(f"  - {working_review_dir}")
-        print(f"  - {finished_completed_dir}")
+        # -------------------------------
+        # Get project
+        # -------------------------------
+        project = (
+            db.query(database_models.Project)
+            .filter(database_models.Project.name == project_name)
+            .first()
+        )
 
-
-        # --- Get project_id from project_name ---
-        project = db.query(database_models.Project).filter(database_models.Project.name == project_name).first()
         if not project:
-            raise HTTPException(status_code=404, detail=f"Project '{project_name}' not found")
-        
-        project_id = project.id
-        print(f"📁 Found project: {project_name} (ID: {project_id})")
+            raise HTTPException(status_code=404, detail="Project not found")
 
-        # --- Upload files to working_directory/raw/ and save to database ---
+        project_id = project.id
+
+        if instructionFile and instructionFile.filename:
+            instruction_key = f"{instruction_dir}{instructionFile.filename}"
+
+        instructionFile.file.seek(0)
+        s3_client.upload_fileobj(
+            instructionFile.file,
+            BUCKET_NAME,
+            instruction_key,
+            ExtraArgs={"ContentType": instructionFile.content_type,
+            "ContentDisposition": "inline"}
+        )
+
+        instruction_file_url = (
+            f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{instruction_key}"
+        )
+
+        # -------------------------------
+        # Store instruction URL in Project table
+        # -------------------------------
+        project.instruction_url = instruction_file_url
+        db.commit()
+
+        # -------------------------------
+        # Upload proof images
+        # -------------------------------
         for file in proofImages:
             if not file.filename:
                 continue
 
-            file_extension = os.path.splitext(file.filename)[1]
-            unique_name = f"{uuid.uuid4().hex}{file_extension}"
-
-            s3_keyy = f"annotation/{project_name}/working_directory/raw/{unique_name}"
-
+            ext = os.path.splitext(file.filename)[1]
+            unique_name = f"{uuid.uuid4().hex}{ext}"
+            s3_key = f"{working_raw_dir}{unique_name}"
 
             file.file.seek(0)
             s3_client.upload_fileobj(
                 file.file,
                 BUCKET_NAME,
-                s3_keyy,
-                ExtraArgs={'ContentType': file.content_type}
+                s3_key,
+                ExtraArgs={"ContentType": file.content_type}
             )
 
-            # --- Create Files record in database ---
-            try:
-                new_file = database_models.Files(
-                    project_id=project_id,
-                    s3_key=s3_keyy,  # Store only the hexadecimal filename
-                    type='image',
-                    status='pending'
-                )
-                
-                db.add(new_file)
-                db.commit()
-                db.refresh(new_file)
-                
-                print(f"💾 Saved file record: ID={new_file.id}, s3_key={s3_keyy}")
-                
-            except Exception as db_error:
-                db.rollback()
-                print(f"❌ Database error for file {unique_name}: {str(db_error)}")
-                # Continue with other files even if one fails
-                continue
+            new_file = database_models.Files(
+                project_id=project_id,
+                s3_key=s3_key,
+                type='image',
+                status='pending'
+            )
 
-            file_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{s3_keyy}"
-            uploaded_files.append(file_url)
+            db.add(new_file)
+            db.commit()
+            db.refresh(new_file)
+
+            uploaded_files.append(
+                f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
+            )
 
         return {
-            "message": "Files uploaded successfully!",
+            "message": "Upload successful",
             "ticket_id": id,
             "project_name": project_name,
             "project_id": project_id,
+            "instruction_file": instruction_file_url,
             "files_uploaded": len(uploaded_files),
             "file_urls": uploaded_files,
         }
@@ -1073,7 +1198,8 @@ def export_project_csv(project_id: str, db: Session = Depends(get_db)):
             database_models.Annotations.review_state,
             database_models.Annotations.review_cycle,
             database_models.Annotations.belief,
-            database_models.Annotations.rejection_description
+            database_models.Annotations.rejection_description,
+            database_models.Annotations.label_count
         )
         .outerjoin(database_models.Annotations, database_models.Annotations.file_id == database_models.Files.id)
         .filter(database_models.Files.project_id == project_id)
@@ -1094,7 +1220,7 @@ def export_project_csv(project_id: str, db: Session = Depends(get_db)):
         "annotation_id", "user_id", "data", "assigned_by",
         "assigned_at", "last_saved_at", "submitted_at",
         "review_state", "review_cycle", "belief",
-        "rejection_description"
+        "rejection_description","label_count"
     ])
 
     # Rows
@@ -1120,6 +1246,7 @@ def export_project_csv(project_id: str, db: Session = Depends(get_db)):
             row.review_cycle,
             row.belief,
             json.dumps(row.rejection_description) if row.rejection_description else None,
+            row.label_count
         ])
 
     output.seek(0)
