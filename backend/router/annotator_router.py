@@ -10,8 +10,7 @@ from helper_functions import admin_helper
 from models import modelsp,database_models
 from database import get_db
 from utils import s3_connection
-
-
+from sqlalchemy import func, cast, Date
 
 
 router = APIRouter(prefix="/api/employee", tags=["auth"])
@@ -22,42 +21,6 @@ AWS_REGION =   os.getenv("AWS_REGION")
 BUCKET_NAME =  os.getenv("BUCKET_NAME")
 
 IST = timezone(timedelta(hours=5, minutes=30))
-
-
-
-
-
-
-# @router.get("/user_projects/{user_id}")
-# def get_user_projects(user_id: str, db: Session = Depends(get_db)):
-#     # Step 1: Get all project IDs for this user from ProjectMember
-#     project_ids = (
-#         db.query(database_models.ProjectMember.project_id)
-#         .filter(database_models.ProjectMember.user_id == user_id)
-#         .all()
-#     )
-
-#     # Flatten list of tuples to a simple list of IDs
-#     project_ids = [pid[0] for pid in project_ids]
-
-#     if not project_ids:
-#         raise HTTPException(status_code=404, detail="No projects found for this user")
-
-#     # Step 2: Fetch all projects using the IDs
-#     projects = db.query(database_models.Project).filter(database_models.Project.id.in_(project_ids)).all()
-
-#     # Step 3: Return detailed project info
-#     return [
-#         {
-#             "project_id": project.id,
-#             "name": project.name,
-#             "description": project.description,
-#             "classes": project.classes,
-#             "created_at": project.created_at,
-#             "updated_at": project.updated_at
-#         }
-#         for project in projects
-#     ]
 
 
 @router.get("/user_projects/{user_id}")
@@ -96,102 +59,6 @@ def get_user_projects(user_id: str, db: Session = Depends(get_db)):
 
 
 
-# @router.get("/{project_id}/assign-file/{employee_id}")
-# def assign_random_file(
-#     project_id: str,
-#     employee_id: str,
-#     db: Session = Depends(get_db),
-#     s3=Depends(s3_connection.get_s3_connection)
-# ):
-#     # Step 1: Validate project
-#     project = db.query(database_models.Project).filter(database_models.Project.id == project_id).first()
-#     if not project:
-#         raise HTTPException(status_code=404, detail="Project not found")
-
-#     # Step 2: Validate user
-#     user = db.query(database_models.Users).filter(database_models.Users.id == employee_id).first()
-#     if not user:
-#         raise HTTPException(status_code=404, detail="User not found")
-
-#     # Step 3: Ensure user is part of the project
-#     project_member = (
-#         db.query(database_models.ProjectMember)
-#         .filter(
-#             database_models.ProjectMember.project_id == project_id,
-#             database_models.ProjectMember.user_id == employee_id
-#         )
-#         .first()
-#     )
-#     if not project_member:
-#         raise HTTPException(status_code=400, detail="User is not part of this project")
-
-#     # Step 4: List available raw files in S3
-#     project_prefix = f"annotation/{project.name}/working_directory/raw/"
-#     response = s3.list_objects_v2(Bucket=BUCKET_NAME, Prefix=project_prefix)
-#     contents = response.get("Contents")
-
-#     if not contents:
-#         raise HTTPException(status_code=404, detail="No files available in raw folder")
-
-#     # Step 5: Pick a random file
-#     selected_file = random.choice(contents)
-#     print("selected_file is",selected_file)
-#     file_key = selected_file["Key"]
-#     print("file_key is ",file_key)
-#     filename = os.path.basename(file_key)#actual file name in s3
-#     print("filename is",filename)
-#     assigned_key = f"annotation/{project.name}/working_directory/assigned/{filename}"
-#     print("assigned_key is",assigned_key) # same as file_key without annotation/ in the path
-#     # Step 6: Move file in S3 (copy + delete)
-#     try:
-#         s3.copy_object(
-#             Bucket=BUCKET_NAME,
-#             CopySource={"Bucket": BUCKET_NAME, "Key": file_key},
-#             Key=assigned_key
-#         )
-#         s3.delete_object(Bucket=BUCKET_NAME, Key=file_key)
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f"Failed to move file in S3: {str(e)}")
-
-#     # Step 7: Update the existing file record
-#     file_record = (
-#         db.query(database_models.Files)
-#         .filter(
-#             database_models.Files.project_id == project_id,
-#             database_models.Files.s3_key == filename
-#         )
-#         .first()
-#     )
-
-#     if not file_record:
-#         raise HTTPException(status_code=404, detail="File record not found in database")
-
-#     file_record.s3_key = filename
-#     file_record.status = "assigned"
-#     db.commit()
-#     db.refresh(file_record)
-
-#     # Step 8: Create new annotation record
-#     new_annotation = database_models.Annotations(
-#         file_id=file_record.id,
-#         user_id=user.id,
-#         assigned_by="random"
-#     )
-#     db.add(new_annotation)
-#     db.commit()
-#     db.refresh(new_annotation)
-
-#     # Step 9: Return success response
-#     file_url = f"https://{BUCKET_NAME}.s3.eu-north-1.amazonaws.com/{assigned_key}"
-
-#     return {
-#         "message": "File assigned successfully",
-#         "employee_id": employee_id,
-#         "file_assigned": assigned_key,
-#         "file_url": file_url,
-#         "file_id": file_record.id,
-#         "annotation_id": new_annotation.id
-#     }
 
 
 
@@ -298,158 +165,6 @@ def assign_random_file(
     }
 
 
-
-
-
-# @router.get("/user/{user_id}/assigned-files")
-# def get_user_assigned_files(
-#     user_id: str,
-#     db: Session = Depends(get_db)
-# ):
-#     try:
-#         # Step 1: Validate user
-#         user = db.query(database_models.Users).filter(database_models.Users.id == user_id).first()
-#         if not user:
-#             raise HTTPException(status_code=404, detail="User not found")
-
-#         # Step 2: Get all annotations created for this user
-#         annotations = (
-#             db.query(database_models.Annotations)
-#             .filter(database_models.Annotations.user_id == user_id)
-#             .all()
-#         )
-
-#         if not annotations:
-#             return []
-
-#         result = []
-
-#         # AWS info (needed to build public URL)
-#         S3_BUCKET = BUCKET_NAME
-        
-
-#         # Step 3: Iterate through annotations and fetch related file & project info
-#         for annotation in annotations:
-#             file = annotation.file
-#             if not file:
-#                 continue
-
-#             project = file.project
-#             if not project:
-#                 continue
-
-#             # Extract just the hex filename (remove any folder prefixes)
-#             filename = os.path.basename(file.s3_key)
-
-#             print("hello sarva",file.s3_key)
-#             print("hello sarva filename",filename)
-#             # Construct the actual object URL manually
-#             object_url = (
-#                 f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/"
-#                 f"annotation/{project.name}/working_directory/{file.status}/{filename}/{filename}"
-#             )
-
-#             # ✅ Include assigned_by and assigned_at fields
-#             result.append({
-#                 "file_id": file.id,
-#                 "filename": filename,
-#                 "project_id": project.id,
-#                 "project_name": project.name,
-#                 "assigned_by": annotation.assigned_by,
-#                 "assigned_at": annotation.assigned_at,
-#                 "status": file.status,
-#                 "object_url": object_url
-#             })
-
-#         if not result:
-#             raise HTTPException(status_code=404, detail="No assigned files found for this user")
-
-#         return result
-
-#     except HTTPException as he:
-#         raise he
-#     except Exception as e:
-#         import traceback
-#         traceback.print_exc()
-#         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
-
-
-
-
-
-# @router.get("/user/{user_id}/assigned-files")
-# def get_user_assigned_files(
-#     user_id: str,
-#     db: Session = Depends(get_db)
-# ):
-#     try:
-#         # Step 1: Validate user
-#         user = (
-#             db.query(database_models.Users)
-#             .filter(database_models.Users.id == user_id)
-#             .first()
-#         )
-#         if not user:
-#             raise HTTPException(status_code=404, detail="User not found")
-
-#         # Step 2: Fetch all annotations for this user
-#         annotations = (
-#             db.query(database_models.Annotations)
-#             .filter(database_models.Annotations.user_id == user_id)
-#             .all()
-#         )
-
-#         if not annotations:
-#             return []
-
-#         result = []
-
-#         # Step 3: Iterate and collect file info
-#         for annotation in annotations:
-#             file = annotation.file
-#             if not file:
-#                 continue
-
-#             project = file.project
-#             if not project:
-#                 continue
-
-#             # Full path stored in DB, for example:
-#             # annotation/<project>/working_directory/assigned/abc123.png
-#             full_s3_key = file.s3_key
-
-#             # Extract filename
-#             filename = os.path.basename(full_s3_key)
-
-#             # Build final object URL — straightforward now
-#             object_url = (
-#                 f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{full_s3_key}"
-#             )
-
-#             result.append({
-#                 "file_id": file.id,
-#                 "filename": filename,
-#                 "project_id": project.id,
-#                 "project_name": project.name,
-#                 "assigned_by": annotation.assigned_by,
-#                 "assigned_at": annotation.assigned_at,
-#                 "status": file.status,
-#                 "object_url": object_url,
-#                 "s3_key": full_s3_key
-#             })
-
-#         if not result:
-#             raise HTTPException(status_code=404, detail="No assigned files found for this user")
-
-#         return result
-
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
-
-
-
 @router.get("/user/{user_id}/assigned-files")
 def get_user_assigned_files(
     user_id: str,
@@ -522,44 +237,6 @@ def get_user_assigned_files(
             detail=f"Internal Server Error: {str(e)}"
         )
 
-
-
-# # Endpoint to save annotation data for a file
-# @router.put("/save_annotation/{file_id}")
-# async def save_annotation(
-#     file_id: int,
-#     request: modelsp.SaveAnnotationData,
-#     db: Session = Depends(get_db)
-# ):
-#     try:
-#         # Step 1: Find the annotation record with the given file_id
-#         annotation_record = db.query(database_models.Annotations).filter(
-#             database_models.Annotations.file_id == file_id
-#         ).first()
-
-#         if not annotation_record:
-#             raise HTTPException(status_code=404, detail="Record not found for given file_id")
-
-#         # Step 2: Convert Pydantic models to dict and update data + timestamp
-#         annotation_record.data = [bbox.dict() for bbox in request.data]
-#         annotation_record.last_saved_at = datetime.now(timezone.utc)
-
-#         # Step 3: Commit changes
-#         db.commit()
-#         db.refresh(annotation_record)
-
-#         return {
-#             "message": "Annotation data saved successfully",
-#             "last_saved_at": annotation_record.last_saved_at
-#         }
-
-#     except HTTPException:
-#         # Re-raise FastAPI HTTPExceptions (like 404)
-#         raise
-#     except Exception as e:
-#         db.rollback()
-#         print("Error saving annotation:", e)
-#         raise HTTPException(status_code=500, detail=f"Error saving annotation data: {str(e)}")
 
 
 
@@ -641,110 +318,6 @@ def get_project_classes(project_id: str, db: Session = Depends(get_db)):
     return project.classes
 
 
-# @router.post("/submit")
-# def submit_file_for_review(
-#     request: modelsp.SubmitFileToReview,
-#     db: Session = Depends(get_db),
-#     s3=Depends(s3_connection.get_s3_connection)
-# ):
-#     """
-#     Annotator submits or resubmits a file for review.
-#     Moves file from assigned → review folder in S3 **only on first submission**.
-#     """
-
-#     try:
-#         # 1️⃣ Fetch annotation entry
-#         annotation = (
-#             db.query(database_models.Annotations)
-#             .filter(
-#                 database_models.Annotations.file_id == request.file_id,
-#                 database_models.Annotations.user_id == request.user_id
-#             )
-#             .first()
-#         )
-#         if not annotation:
-#             raise HTTPException(status_code=404, detail="Annotation not found for this file and user.")
-
-#         # 2️⃣ Get project and file info
-#         file_obj = db.query(database_models.Files).filter(database_models.Files.id == request.file_id).first()
-#         if not file_obj:
-#             raise HTTPException(status_code=404, detail="File not found.")
-
-#         project = db.query(database_models.Project).filter(database_models.Project.id == request.project_id).first()
-#         if not project:
-#             raise HTTPException(status_code=404, detail="Project not found.")
-
-#         filename = os.path.basename(file_obj.s3_key)
-
-#         # 3️⃣ Detect first submission vs resubmission
-#         is_first_submission = (
-#             annotation.review_cycle == 0 and
-#             annotation.review_state in ['not_reviewed', 'in_review']
-#         )
-
-#         # 4️⃣ Update annotation + file DB records
-#         if is_first_submission:
-#             annotation.review_state = 'not_reviewed'
-#             annotation.belief = True
-#             annotation.submitted_at = datetime.now(IST)
-#             print("the time is",annotation.submitted_at)
-#             annotation.review_cycle += 1
-
-#           # 5️⃣ Move file in S3 — only on first submission
-#         if is_first_submission:
-#             assigned_key = f"annotation/{project.name}/working_directory/assigned/{filename}"
-#             review_key = f"annotation/{project.name}/working_directory/review/{filename}"
-
-#             try:
-#                 s3.copy_object(
-#                     Bucket=BUCKET_NAME,
-#                     CopySource={"Bucket": BUCKET_NAME, "Key": assigned_key},
-#                     Key=review_key
-#                 )
-#                 s3.delete_object(Bucket=BUCKET_NAME, Key=assigned_key)
-#                 #file_obj.s3_key = review_key
-#             except Exception as e:
-#                 raise HTTPException(status_code=500, detail=f"Failed to move file in S3: {str(e)}")
-
-       
-
-#         else:
-#             if annotation.review_state != 'rejected':
-#                 raise HTTPException(status_code=400, detail="File is not rejected, cannot resubmit.")
-
-#             annotation.review_state = 'in_review'
-#             annotation.belief = True
-#             annotation.submitted_at = datetime.now(timezone.ist)
-#             annotation.review_cycle += 1
-
-#             # Reset last review decision (only for resubmission)
-#             review_record = (
-#                 db.query(database_models.AnnotationReviews)
-#                 .filter(database_models.AnnotationReviews.annotation_id == annotation.id)
-#                 .order_by(database_models.AnnotationReviews.id.desc())
-#                 .first()
-#             )
-#             if review_record:
-#                 review_record.decision = None
-
-#         # Always ensure DB file status matches
-#         file_obj.status = 'review'
-
-#         db.commit()
-
-#         msg = "File submitted for review (first submission)." if is_first_submission else f"File resubmitted for review (cycle {annotation.review_cycle})."
-#         return {"message": msg, "file_id": file_obj.id, "review_cycle": annotation.review_cycle}
-
-#     except SQLAlchemyError as e:
-#         db.rollback()
-#         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-#     except HTTPException:
-#         raise
-
-#     except Exception as e:
-#         db.rollback()
-#         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
 
@@ -799,6 +372,9 @@ def submit_file_for_review(
             annotation.review_state = 'not_reviewed'
             annotation.belief = True
             annotation.submitted_at = datetime.now(IST)
+            if  annotation.review_cycle==0:
+                print("the label count is",len(annotation.data))
+                annotation.label_count=len(annotation.data)
             annotation.review_cycle += 1
 
             # 5️⃣ Move file in S3 — assigned → review
@@ -827,6 +403,10 @@ def submit_file_for_review(
             annotation.belief = True
             annotation.submitted_at = datetime.now(IST)
             annotation.review_cycle += 1
+           
+
+
+           
 
             # Reset last review decision
             review_record = (
@@ -867,55 +447,6 @@ def submit_file_for_review(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
-
-# @router.get("/rejected/{employee_id}/{project_id}")
-# def get_rejected_files(employee_id: str, project_id: str, db: Session = Depends(get_db)):
-#     """
-#     Get all rejected files for a specific employee in a given project.
-#     """
-
-#     project = db.query(database_models.Project).filter(database_models.Project.id == project_id).first()
-#     if not project:
-#         raise HTTPException(status_code=404, detail="Project not found")
-
-#     # Fetch rejected files based on annotation state (safer than relying on reviews)
-#     rejected_files = (
-#         db.query(database_models.Files)
-#         .join(database_models.Annotations, database_models.Annotations.file_id == database_models.Files.id)
-#         .filter(
-#             database_models.Files.project_id == project_id,
-#             database_models.Annotations.user_id == employee_id,
-#             database_models.Annotations.review_state == "rejected"
-#         )
-#         .distinct(database_models.Files.id)
-#         .all()
-#     )
-
-#     if not rejected_files:
-#         raise HTTPException(status_code=404, detail="No rejected files found.")
-
-#     files_data = []
-#     for file in rejected_files:
-#         filename = file.s3_key.split("/")[-1]
-#         review_key = f"annotation/{project.name}/working_directory/review/{filename}"
-#         object_url = f"https://{BUCKET_NAME}.s3.eu-north-1.amazonaws.com/{review_key}"
-
-#         files_data.append({
-#             "file_id": file.id,
-#             "filename": filename,
-#             "file_type": file.type,
-#             "status": file.status,
-#             "s3_key": review_key,
-#             "object_url": object_url
-#         })
-
-#     return {
-#         "status": "rejected",
-#         "project_id": project_id,
-#         "employee_id": employee_id,
-#         "rejected_files_count": len(files_data),
-#         "files": files_data
-#     }
 
 
 
@@ -999,4 +530,128 @@ def get_rejection_description(file_id: int, db: Session = Depends(get_db)):
     return {
         "file_id": file_id,
         "rejection_description": annotation.rejection_description or []
+    }
+
+
+@router.get("/weekly-labels/{project_id}/{user_id}")
+def get_weekly_labels(
+    project_id: str,
+    user_id: str,
+    week_offset: int = 0,
+    db: Session = Depends(get_db),
+):
+
+    # -----------------------------------------
+    # 1. Compute Monday → Sunday for the target week
+    # -----------------------------------------
+    today = datetime.now().date()
+
+    # Monday of current week
+    current_week_start = today - timedelta(days=today.weekday())
+
+    # Adjust based on week_offset
+    target_week_start = current_week_start + timedelta(days=week_offset * 7)
+    target_week_end = target_week_start + timedelta(days=7)
+
+    # -----------------------------------------
+    # 2. Query: sum(label_count) grouped by day
+    # -----------------------------------------
+    raw_results = (
+        db.query(
+            cast(database_models.Annotations.submitted_at, Date).label("day"),
+            func.sum(database_models.Annotations.label_count).label("total_labels")
+        )
+        .join(database_models.Files, database_models.Files.id == database_models.Annotations.file_id)
+        .filter(database_models.Files.project_id == project_id)
+        .filter(database_models.Annotations.user_id == user_id)
+        .filter(database_models.Annotations.submitted_at >= target_week_start)
+        .filter(database_models.Annotations.submitted_at < target_week_end)
+        .group_by(cast(database_models.Annotations.submitted_at, Date))
+        .all()
+    )
+
+    # Convert DB result → dictionary for quick lookup
+    result_map = {str(row.day): row.total_labels for row in raw_results}
+
+    # -----------------------------------------
+    # 3. Build FULL week output (Mon-Sun), filling missing days with 0
+    # -----------------------------------------
+    weekly_data = {}
+    day_ptr = target_week_start
+
+    for _ in range(7):   # always 7 days
+        day_str = str(day_ptr)
+        weekly_data[day_str] = result_map.get(day_str, 0)
+        day_ptr += timedelta(days=1)
+
+    # -----------------------------------------
+    # 4. Return result
+    # -----------------------------------------
+    return {
+        "week_start": str(target_week_start),
+        "week_end": str(target_week_end),
+        "days": weekly_data
+    }
+
+
+
+
+@router.get("/weekly-records/{project_id}/{user_id}")
+def get_weekly_records(
+    project_id: str,
+    user_id: str,
+    week_offset: int = 0,
+    db: Session = Depends(get_db),
+):
+
+    # -----------------------------------------
+    # 1. Compute Monday → Sunday for the target week
+    # -----------------------------------------
+    today = datetime.now().date()
+
+    # Monday of current week
+    current_week_start = today - timedelta(days=today.weekday())
+
+    # Apply week offset
+    target_week_start = current_week_start + timedelta(days=week_offset * 7)
+    target_week_end = target_week_start + timedelta(days=7)
+
+    # -----------------------------------------
+    # 2. Query: COUNT(*) grouped by date(submitted_at)
+    # -----------------------------------------
+    raw_results = (
+        db.query(
+            cast(database_models.Annotations.submitted_at, Date).label("day"),
+            func.count(database_models.Annotations.id).label("record_count")
+        )
+        .join(database_models.Files, database_models.Files.id == database_models.Annotations.file_id)
+        .filter(database_models.Files.project_id == project_id)
+        .filter(database_models.Annotations.user_id == user_id)
+        .filter(database_models.Annotations.submitted_at >= target_week_start)
+        .filter(database_models.Annotations.submitted_at < target_week_end)
+        .group_by(cast(database_models.Annotations.submitted_at, Date))
+        .all()
+    )
+
+    # Convert to dictionary for quick lookup
+    result_map = {str(r.day): r.record_count for r in raw_results}
+
+    # -----------------------------------------
+    # 3. Build output for ALL 7 days (fill zeros)
+    # -----------------------------------------
+    weekly_data = {}
+    day_ptr = target_week_start
+
+    for _ in range(7):
+        day_str = str(day_ptr)
+        weekly_data[day_str] = result_map.get(day_str, 0)
+        day_ptr += timedelta(days=1)
+
+    # -----------------------------------------
+    # 4. Return final formatted result
+    # -----------------------------------------
+    return {
+        "week_start": str(target_week_start),
+        "week_end": str(target_week_end),
+        "days": weekly_data
     }
